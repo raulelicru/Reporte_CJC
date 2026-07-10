@@ -13,14 +13,19 @@ def render():
         st.info("Sin campañas. Carga al menos una; con dos o más, esta vista muestra la tendencia sin recalcular a mano.")
         st.stop()
 
-    ui.page_header("La vista que justifica el sistema", "Comparativa entre campañas",
-                   "Campaña sobre campaña: qué se está haciendo bien y qué mal en el tiempo. Ojo con la madurez — comparar una recién liberada contra una madura distorsiona la lectura.")
+    ui.page_header("La vista que justifica el sistema", "Comparativa día a día / campaña a campaña",
+                   "Cada punto es un snapshot (una carga diaria). Se ve cómo evoluciona la recuperación conforme la campaña madura, y campaña contra campaña. Ojo con la madurez — comparar una recién liberada contra una madura distorsiona la lectura.")
 
     if len(camps) < 2:
-        ui.callout("info", "Solo hay una campaña cargada",
-                   "La tendencia aparece al cargar una segunda campaña. El sistema ya guarda la serie; no hace falta recalcular nada a mano.")
+        ui.callout("info", "Solo hay un snapshot cargado",
+                   "La tendencia aparece al cargar más días. El sistema ya guarda la serie; cada carga diaria suma un punto sin recalcular nada a mano.")
 
-    labels = [c["anio_campania"] for c in camps]
+    # Etiqueta por día (snapshot); si hay varias campañas, antepone el código.
+    multi = len({c["anio_campania"] for c in camps}) > 1
+    labels = [
+        (f'{c["anio_campania"]}·{(c.get("fecha_snapshot") or "")[5:]}' if multi else (c.get("fecha_snapshot") or c["anio_campania"]))
+        for c in camps
+    ]
     res_by = {r["campaign_id"]: r for r in comp["resumenes"]}
     recuperado = [res_by.get(c["id"], {}).get("recuperado", 0) for c in camps]
     espont = [res_by.get(c["id"], {}).get("pct_espontaneo", 0) * 100 for c in camps]

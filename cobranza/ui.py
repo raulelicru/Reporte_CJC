@@ -66,11 +66,17 @@ class Data:
         }
 
     def resumen_previo(self, campaigns, actual):
-        ordenadas = sorted(campaigns, key=lambda c: c["anio_campania"])
-        idx = next((i for i, c in enumerate(ordenadas) if c["id"] == actual["id"]), 0)
-        if idx <= 0:
+        # Snapshot anterior de la MISMA campaña (día previo). Si no hay foto
+        # previa de esa campaña, el delta queda vacío.
+        mismos = [
+            c for c in campaigns
+            if c["anio_campania"] == actual["anio_campania"]
+            and (c.get("fecha_snapshot") or "") < (actual.get("fecha_snapshot") or "")
+        ]
+        if not mismos:
             return None
-        return self.resumen(ordenadas[idx - 1]["id"])
+        prev = max(mismos, key=lambda c: c.get("fecha_snapshot") or "")
+        return self.resumen(prev["id"])
 
 
 def _avg_cumpl(agentes):

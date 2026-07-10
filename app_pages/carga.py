@@ -1,4 +1,6 @@
 """Carga de datos (§8 pág. 10) — solo admin. Perfila antes de confirmar."""
+from datetime import date
+
 import streamlit as st
 
 from cobranza import db, ui
@@ -24,9 +26,12 @@ def render():
     ui.page_header("Solo admin", "Carga de datos",
                    "Sube los 6 archivos. Primero verás el perfilado y los flags de calidad; nada se persiste hasta que confirmas.")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     anio = col1.text_input("AnioCampaniaSaldo", placeholder="2025C12")
     nombre = col2.text_input("Nombre", placeholder="Campaña 12 · 2025")
+    snapshot = col3.date_input("Fecha del snapshot (día de carga)", value=date.today())
+    st.caption("Cada día se cargan los 6 archivos: cada carga es una foto del día. "
+               "Recargar el mismo día reemplaza esa foto; otro día crea una nueva y conserva las pasadas.")
 
     files = {}
     for key, label in CAMPOS:
@@ -41,6 +46,7 @@ def render():
             st.session_state["carga_ing"] = ing
             st.session_state["carga_anio"] = anio
             st.session_state["carga_nombre"] = nombre or f"Campaña {anio}"
+            st.session_state["carga_snapshot"] = snapshot.isoformat()
         except Exception as e:
             st.error(f"Error al parsear: {e}")
             st.session_state.pop("carga_ing", None)
@@ -57,8 +63,9 @@ def render():
                 prof = st.session_state.get("profile") or {}
                 cid = db.persist_campaign(admin, prof.get("org_id", db.DEFAULT_ORG),
                                           st.session_state["carga_anio"], st.session_state["carga_nombre"],
-                                          st.session_state.get("user_id"), ing, m)
-                st.success(f"Campaña persistida ({cid}). Ve al Resumen ejecutivo.")
+                                          st.session_state.get("user_id"), ing, m,
+                                          fecha_snapshot=st.session_state.get("carga_snapshot"))
+                st.success(f"Snapshot del {st.session_state.get('carga_snapshot')} persistido ({cid}). Ve al Resumen ejecutivo.")
                 st.session_state["cid"] = cid
                 st.session_state.pop("carga_ing", None)
             except Exception as e:

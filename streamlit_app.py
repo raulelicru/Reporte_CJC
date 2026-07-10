@@ -41,9 +41,12 @@ with st.sidebar:
 
     actual, camps = ui.selected_campaign()
     if camps:
-        labels = {f'{c["anio_campania"]} · {c["nombre"]}': c["id"] for c in camps}
+        labels = {
+            f'{c["anio_campania"]} · {c.get("fecha_snapshot") or "s/f"}': c["id"]
+            for c in camps
+        }
         cur_label = next((k for k, v in labels.items() if v == st.session_state["cid"]), list(labels.keys())[0])
-        chosen = st.selectbox("Campaña", list(labels.keys()), index=list(labels.keys()).index(cur_label))
+        chosen = st.selectbox("Campaña · día (snapshot)", list(labels.keys()), index=list(labels.keys()).index(cur_label))
         st.session_state["cid"] = labels[chosen]
         ui.campaign_badge(actual)
         st.caption(f'Saldo {money_k(actual.get("saldo_asignado"))} · {num(actual.get("deudas"))} deudas · {num(actual.get("consultoras"))} consultoras')

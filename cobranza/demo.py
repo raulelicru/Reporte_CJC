@@ -94,18 +94,26 @@ def build_demo() -> dict:
     data: dict[str, dict] = {}
     hist_puntos: dict[str, dict] = {}
 
-    for anio, seed, nombre in [("2025C12", 12, "Campaña 12 · 2025"), ("2025C13", 13, "Campaña 13 · 2025")]:
+    # Snapshots DIARIOS: la campaña 2025C12 se carga varios días conforme madura,
+    # más un segundo día de otra campaña para la comparativa cruzada.
+    SNAPSHOTS = [
+        ("2025C12", "2025-06-26", 120, "Campaña 12 · 2025"),
+        ("2025C12", "2025-06-27", 121, "Campaña 12 · 2025"),
+        ("2025C12", "2025-06-28", 122, "Campaña 12 · 2025"),
+        ("2025C13", "2025-06-28", 130, "Campaña 13 · 2025"),
+    ]
+
+    for anio, snap, seed, nombre in SNAPSHOTS:
         ing = build_ingest(synth(anio, seed))
         m = compute_metrics(ing)
-        cid = anio
+        cid = f"{anio}@{snap}"
         camp = {
-            "id": cid, "anio_campania": anio, "nombre": nombre,
+            "id": cid, "anio_campania": anio, "nombre": nombre, "fecha_snapshot": snap,
             "fecha_liberacion": ing.profile["fecha_liberacion"], "fecha_corte_datos": ing.profile["fecha_corte_datos"],
             "saldo_asignado": ing.header["saldo_asignado"], "deudas": ing.header["deudas"], "consultoras": ing.header["consultoras"],
         }
         campaigns.append(camp)
 
-        # métricas de canal con nombres de columna DB
         canal = [{"canal": c["canal"], "monto_ultimo_toque": c["monto_ultimo_toque"], "pagos": c["pagos"],
                   "consultoras": c["consultoras"], "pct": c["pct"], "eficiencia_por_toque": c["eficiencia_por_toque"],
                   "influencia_monto": c["influencia_monto"], "influencia_pct": c["influencia_pct"]} for c in m["canal"]]
@@ -118,11 +126,12 @@ def build_demo() -> dict:
                                                    "minutos": ing.profile["costo_marcador"]["minutos"],
                                                    "contactos_efectivos": ing.profile["costo_marcador"]["contactos_efectivos"]},
         }
-        for a in m["agentes"]:
-            norm = a["agente_id"]
-            entry = hist_puntos.setdefault(norm, {"display": a["nombre"], "puntos": []})
-            entry["puntos"].append({"anio": anio, "contacto": a["tasa_contacto"],
-                                    "cumplimiento": a["pct_cumplimiento"], "clasificacion": a["clasificacion"]})
+        # Evolución del gestor por día (snapshot): solo la campaña principal.
+        if anio == "2025C12":
+            for a in m["agentes"]:
+                entry = hist_puntos.setdefault(a["agente_id"], {"display": a["nombre"], "puntos": []})
+                entry["puntos"].append({"anio": snap, "contacto": a["tasa_contacto"],
+                                        "cumplimiento": a["pct_cumplimiento"], "clasificacion": a["clasificacion"]})
 
     for e in hist_puntos.values():
         e["puntos"].sort(key=lambda x: x["anio"])

@@ -16,7 +16,11 @@ def render():
     costo = d.costo_marcador(actual["id"]) or {}
     canales = d.canal(actual["id"]) or []
 
-    ui.page_header(f"Campaña {actual['anio_campania']}", "Resumen ejecutivo")
+    _snap = actual.get("fecha_snapshot")
+    ui.page_header(
+        f"Campaña {actual['anio_campania']}" + (f" · snapshot {_snap}" if _snap else ""),
+        "Resumen ejecutivo",
+    )
 
     cols = st.columns(3)
     kpis = [

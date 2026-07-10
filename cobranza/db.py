@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import os
+from datetime import date as _date
 from typing import Any
 
 from supabase import Client, create_client
@@ -57,7 +58,15 @@ def get_profile(client: Client, user_id: str) -> dict | None:
 
 # ── Lecturas (RLS aplica con el cliente autenticado) ──
 def get_campaigns(client: Client) -> list[dict]:
-    return client.table("campaigns").select("*").order("anio_campania", desc=True).execute().data or []
+    return (
+        client.table("campaigns")
+        .select("*")
+        .order("anio_campania", desc=True)
+        .order("fecha_snapshot", desc=True)
+        .execute()
+        .data
+        or []
+    )
 
 
 def _rows(client: Client, table: str, campaign_id: str, order: str | None = None) -> list[dict]:
@@ -108,7 +117,7 @@ def get_costo_marcador(client, cid):
 
 
 def get_comparativa(client) -> dict:
-    camps = client.table("campaigns").select("*").order("anio_campania").execute().data or []
+    camps = client.table("campaigns").select("*").order("anio_campania").order("fecha_snapshot").execute().data or []
     resumenes = client.table("metrics_resumen").select("*").execute().data or []
     canales = client.table("metrics_canal").select("*").execute().data or []
     agentes = client.table("metrics_agente").select("campaign_id, pdp, pdp_cumplidas").execute().data or []
@@ -123,7 +132,7 @@ def get_comparativa(client) -> dict:
 
 def get_historia_gestores(client) -> dict:
     d = client.table("metrics_agente").select(
-        "tasa_contacto, pct_cumplimiento, clasificacion, agentes:agente_id(nombre_norm, nombre_display), campaigns:campaign_id(anio_campania)"
+        "tasa_contacto, pct_cumplimiento, clasificacion, agentes:agente_id(nombre_norm, nombre_display), campaigns:campaign_id(anio_campania, fecha_snapshot)"
     ).execute().data or []
     hist: dict[str, dict] = {}
     for r in d:
@@ -131,9 +140,12 @@ def get_historia_gestores(client) -> dict:
         norm = ag.get("nombre_norm")
         if not norm:
             continue
+        camp = r.get("campaigns") or {}
+        # El eje de evolución es el día (snapshot); cae a anio_campania si falta.
+        etiqueta = camp.get("fecha_snapshot") or camp.get("anio_campania", "?")
         entry = hist.setdefault(norm, {"display": ag.get("nombre_display") or norm, "puntos": []})
         entry["puntos"].append({
-            "anio": (r.get("campaigns") or {}).get("anio_campania", "?"),
+            "anio": etiqueta,
             "contacto": r["tasa_contacto"], "cumplimiento": r["pct_cumplimiento"], "clasificacion": r["clasificacion"],
         })
     for e in hist.values():
@@ -147,14 +159,19 @@ def _chunks(rows: list[dict], n: int = 1000):
         yield rows[i:i + n]
 
 
-def persist_campaign(db: Client, org_id: str, anio: str, nombre: str, cargado_por: str | None, ingest, metrics: dict) -> str:
+def persist_campaign(db: Client, org_id: str, anio: str, nombre: str, cargado_por: str | None,
+                     ingest, metrics: dict, fecha_snapshot: str | None = None) -> str:
+    # Snapshot diario: la llave es (org, anio_campania, fecha_snapshot). Recargar
+    # el mismo día reemplaza esa foto; otro día crea una nueva (§ migración 0004).
+    snapshot = fecha_snapshot or _date.today().isoformat()
     camp = db.table("campaigns").upsert({
         "org_id": org_id, "anio_campania": anio, "nombre": nombre,
+        "fecha_snapshot": snapshot,
         "fecha_liberacion": ingest.profile.get("fecha_liberacion"),
         "fecha_corte_datos": ingest.profile.get("fecha_corte_datos"),
         "saldo_asignado": ingest.header["saldo_asignado"], "deudas": ingest.header["deudas"],
         "consultoras": ingest.header["consultoras"], "cargado_por": cargado_por,
-    }, on_conflict="org_id,anio_campania").execute().data
+    }, on_conflict="org_id,anio_campania,fecha_snapshot").execute().data
     campaign_id = camp[0]["id"]
 
     for t in ["cartera", "pagos", "toques", "gestiones", "agentes", "costo_marcador",
