@@ -1,0 +1,158 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #fbfaf7;
+  --panel: #ffffff;
+  --ink: #16202e;
+  --ink70: #5a6472;
+  --line: #e4e8ee;
+  --amber: #b77e17;
+  --teal: #12a99a;
+  --rose: #d6486a;
+  --grayc: #8a94a3;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Toda cifra en mono con tabular-nums (§9). */
+.num,
+.tabular {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.display {
+  font-family: Fraunces, Georgia, serif;
+  letter-spacing: -0.01em;
+}
+
+.eyebrow {
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink70);
+  font-weight: 600;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+/* Barras (bar-row / bar-track / bar-fill) — §9. */
+.bar-row {
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+.bar-track {
+  position: relative;
+  height: 22px;
+  background: #f1f0eb;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 5px;
+  transition: width 0.4s ease;
+}
+
+/* Tags de canal con punto de color. */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.tag .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.dot-llamada { background: var(--amber); }
+.dot-ivr { background: var(--rose); }
+.dot-sms { background: var(--teal); }
+.dot-espontaneo { background: var(--grayc); }
+
+.fill-llamada { background: var(--amber); }
+.fill-ivr { background: var(--rose); }
+.fill-sms { background: var(--teal); }
+.fill-espontaneo { background: var(--grayc); }
+
+/* Callouts para hallazgos críticos. */
+.callout {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+.callout.warn { border-color: #ecd9b0; background: #fdf8ee; }
+.callout.crit { border-color: #f0c6d1; background: #fdf1f4; }
+
+/* Tablas de mando. */
+table.mando {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+table.mando th {
+  text-align: left;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink70);
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+  user-select: none;
+}
+table.mando td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+}
+table.mando tr:hover td {
+  background: #faf9f5;
+}
+
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--line);
+}
+.chip-mentor { background: #eafaf4; color: #0c7a6f; border-color: #b8e6da; }
+.chip-coaching { background: #fdf8ee; color: #9a6a12; border-color: #ecd9b0; }
+.chip-volumen { background: #eef3fb; color: #2b5c9a; border-color: #cfe0f5; }
+.chip-plan { background: #fdf1f4; color: #b03a5a; border-color: #f0c6d1; }
+
+@media (max-width: 800px) {
+  .bar-row { grid-template-columns: 96px 1fr auto; }
+}
+
+@media print {
+  aside.sidebar { display: none !important; }
+  .no-print { display: none !important; }
+  body { background: #fff; }
+  main { padding: 0 !important; }
+  .panel { break-inside: avoid; }
+}

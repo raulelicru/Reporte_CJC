@@ -1,0 +1,45 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# testing
+/coverage
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# local env files — never commit real keys
+.env
+.env*.local
+.env.local
+
+# vercel / supabase
+.vercel
+.supabase
+
+# raw uploaded campaign files (auditoría vive en Supabase Storage, no en git)
+/data/seed/*.xlsx
+/data/uploads/
+
+# editor
+.idea
+.vscode
+
+# TS incremental build info
+tsconfig.tsbuildinfo
+*.tsbuildinfo
