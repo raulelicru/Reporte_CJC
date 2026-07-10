@@ -43,3 +43,11 @@ yarn-error.log*
 # TS incremental build info
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+# ── Python / Streamlit ──
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.streamlit/secrets.toml
