@@ -18,8 +18,15 @@ _EXCEL_EPOCH = date(1899, 12, 30)
 
 def to_iso_date(value) -> str | None:
     """Convierte a ISO YYYY-MM-DD o None si no es parseable."""
-    if value is None or (isinstance(value, float) and math.isnan(value)) or value == "":
+    if value is None or value == "":
         return None
+    # Guard de nulos de pandas (NaT/NaN): antes devolvía el texto "NaT", que al
+    # ordenar quedaba como "máximo" y rompía la fecha de corte de canal.
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
 
     # pandas Timestamp / datetime / date
     if isinstance(value, (pd.Timestamp, datetime, date)):

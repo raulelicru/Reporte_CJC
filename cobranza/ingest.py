@@ -9,10 +9,36 @@ estructurales de §4 en el punto de construcción:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Any
 
 import pandas as pd
+
+_PROMESA_DM = re.compile(r"^(\d{1,2})\s*/\s*(\d{1,2})(?:\s*/\s*(\d{2,4}))?$")
+
+
+def _parse_promesa(val, fecha_hint: str | None) -> str | None:
+    """Parsea PROMESA. Soporta 'dd/mm/yyyy' y el real 'd/m' (sin año): toma el
+    año de la fecha de la gestión (fecha_hint ISO)."""
+    if val is None or val == "":
+        return None
+    s = str(val).strip()
+    m = _PROMESA_DM.match(s)
+    if m:
+        d, mo, y = m.groups()
+        if y:
+            year = int(y) + (2000 if len(y) == 2 else 0)
+        elif fecha_hint:
+            year = int(fecha_hint[:4])
+        else:
+            return None
+        try:
+            return date(year, int(mo), int(d)).isoformat()
+        except ValueError:
+            return None
+    return to_iso_date(val)
 
 from .coerce import (
     norm_key,
@@ -158,12 +184,12 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
     # ── 3) Gestiones (CRM) ──
     df = sheets["gestiones"]
     cm = _colmap(df, {
-        "num_dama": ["CODIGO", "NumDama"], "gestor": ["NOMBRE GESTOR"], "fecha": ["FECHA"],
+        "num_dama": ["CODIGO", "NumDama"], "gestor": ["NOMBRE GESTOR", "NOMBRE"], "fecha": ["FECHA"],
         "tipo_gestion": ["TIPO DE GESTION"], "tipificacion": ["TIPIFICACION", "TIPIFICACIlON"],
         "promesa": ["PROMESA", "DIA PROM"], "medicion": ["MEDICION"], "temp": ["temp"],
     })
     gestiones: list[dict] = []
-    medicion_vacia = sin_fecha = 0
+    medicion_vacia = sin_fecha = sistema = 0
     for row in _records(df, cm):
         num_dama = to_int(row.get("num_dama"))
         if num_dama is None:
@@ -174,15 +200,26 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
         if not to_str(row.get("medicion")):
             medicion_vacia += 1
         gestor = to_str(row.get("gestor"))
+        norm = normalize_name(gestor) if gestor else None
+        # "Sistema" y nombres del marcador (Outbound Auto Dial / Inbound No Agent)
+        # son entradas automáticas, no gestores humanos (C2/C3).
+        if norm in ("sistema", "") or is_auto_dialer(gestor):
+            if norm:
+                sistema += 1
+            norm = None
         gestiones.append({
-            "num_dama": num_dama, "agente_norm": normalize_name(gestor) if gestor else None,
+            "num_dama": num_dama, "agente_norm": norm,
             "agente_display": gestor, "fecha": fecha, "tipo_gestion": to_str(row.get("tipo_gestion")),
-            "tipificacion": to_str(row.get("tipificacion")), "promesa_fecha": to_iso_date(row.get("promesa")),
+            "tipificacion": to_str(row.get("tipificacion")),
+            "promesa_fecha": _parse_promesa(row.get("promesa"), fecha),
             "monto_prometido": None, "temp": to_str(row.get("temp")),
         })
+    if sistema > 0:
+        _flag(flags, "gestiones_sistema", f"{sistema} gestiones automáticas ('Sistema') excluidas del roster de gestores (no son personas).")
     n_gest = len(gestiones)
     if medicion_vacia > 0:
-        _flag(flags, "medicion_vacia", f"MEDICION vacía en {medicion_vacia}/{max(1, n_gest)} filas (~99.97%) — inutilizable, no se muestra.")
+        _pct = medicion_vacia / max(1, n_gest) * 100
+        _flag(flags, "medicion_vacia", f"MEDICION vacía en {medicion_vacia}/{n_gest} filas ({_pct:.1f}%) — inutilizable, no se muestra.")
     if sin_fecha > 0:
         _flag(flags, "gestiones_sin_fecha", f"{sin_fecha} gestiones sin FECHA parseable.", "warn")
 
@@ -220,15 +257,24 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
 
     # ── 5) Toques unificados ──
     toques: list[dict] = []
-    for g in gestiones:  # Llamada ← CRM (trae el resultado). C1.
-        if not g["fecha"]:
+    for g in gestiones:  # Llamada ← CRM humano (trae el resultado). C1.
+        # Solo gestiones de un gestor real (no 'Sistema') son toques de Llamada.
+        if not g["fecha"] or not g["agente_norm"]:
             continue
         toques.append({"num_dama": g["num_dama"], "canal": "Llamada", "dia": g["fecha"],
                        "efectivo": gestion_efectiva(g["tipo_gestion"]), "meta": {"agente": g["agente_norm"]}})
 
+    # IVR/Reminder: el export real viene en esquema Vicidial (call_date, No. Dama,
+    # status_name). Se aceptan ambos formatos (spec y real).
     df = sheets["ivr"]
-    cm = _colmap(df, {"num_dama": ["Nodama", "NoDama", "NumDama"], "fecha": ["Fecha de la Llamada"],
-                      "status": ["Status"], "dtmf": ["Respuesta DTMF"]})
+    cm = _colmap(df, {
+        "num_dama": ["Nodama", "No. Dama", "No Dama", "NoDama", "NumDama"],
+        "fecha": ["Fecha de la Llamada", "call_date"],
+        # Preferir la columna DESCRIPTIVA (status_name / Estado) sobre el código
+        # terse (status = AB/AA/DROP), que no dice si conectó.
+        "status": ["status_name", "Estado de la Llamada", "Estado Final", "Status"],
+        "dtmf": ["Respuesta DTMF"],
+    })
     ivr_sin_fecha = ivr_total = 0
     ivr_en_cartera = 0
     for row in _records(df, cm):

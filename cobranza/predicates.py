@@ -21,9 +21,27 @@ def gestion_efectiva(tipo_gestion: str | None) -> bool:
     return _norm(tipo_gestion) == "contacto"
 
 
+# Estados del blaster IVR (Vicidial) que NO son contacto con una persona.
+_IVR_NO_CONTACTO = (
+    "ocupado", "buzon", "no answer", "noanswer", "no contesta",
+    "no disponible", "drop", "pre-routing", "prerouting", "pre routing",
+)
+
+
 def ivr_efectivo(status: str | None) -> bool:
-    """IVR/Reminder → efectivo si Status == 'Contacto'."""
-    return _norm(status) == "contacto"
+    """IVR/Reminder → efectivo si la llamada conectó con una persona.
+
+    Soporta el formato del spec (Status == 'Contacto') y el real (Vicidial
+    `status_name`: 'Ocupado automatico', 'Buzon automatico', 'Llamada
+    transferida', 'PROMESA DE PAGO', …). Efectivo = hay estado y no es un
+    no-contacto automático (ocupado, buzón, no contesta, drop, sin agente…).
+    """
+    n = _norm(status)
+    if not n:
+        return False
+    if n == "contacto":
+        return True
+    return not any(k in n for k in _IVR_NO_CONTACTO)
 
 
 def sms_efectivo(descripcion: str | None) -> bool:
