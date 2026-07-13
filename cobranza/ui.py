@@ -17,46 +17,45 @@ class Data:
     def __init__(self):
         self.demo = st.session_state.get("demo", False)
         self.store = st.session_state.get("store")
-        self.client = st.session_state.get("client")
 
     def campaigns(self):
         if self.demo:
             return self.store["campaigns"]
-        return db.get_campaigns(self.client)
+        return db.get_campaigns()
 
     def _d(self, cid, key):
         return self.store["data"].get(cid, {}).get(key)
 
     def resumen(self, cid):
-        return self._d(cid, "resumen") if self.demo else db.get_resumen(self.client, cid)
+        return self._d(cid, "resumen") if self.demo else db.get_resumen(cid)
 
     def canal(self, cid):
-        return self._d(cid, "canal") if self.demo else db.get_canal(self.client, cid)
+        return self._d(cid, "canal") if self.demo else db.get_canal(cid)
 
     def agentes(self, cid):
-        return self._d(cid, "agentes") if self.demo else db.get_agentes(self.client, cid)
+        return self._d(cid, "agentes") if self.demo else db.get_agentes(cid)
 
     def temporalidad(self, cid):
-        return self._d(cid, "temporalidad") if self.demo else db.get_temporalidad(self.client, cid)
+        return self._d(cid, "temporalidad") if self.demo else db.get_temporalidad(cid)
 
     def diaria(self, cid):
-        return self._d(cid, "diaria") if self.demo else db.get_diaria(self.client, cid)
+        return self._d(cid, "diaria") if self.demo else db.get_diaria(cid)
 
     def secuencias(self, cid):
-        return self._d(cid, "secuencias") if self.demo else db.get_secuencias(self.client, cid)
+        return self._d(cid, "secuencias") if self.demo else db.get_secuencias(cid)
 
     def flags(self, cid):
-        return self._d(cid, "flags") if self.demo else db.get_quality_flags(self.client, cid)
+        return self._d(cid, "flags") if self.demo else db.get_quality_flags(cid)
 
     def costo_marcador(self, cid):
-        return self._d(cid, "costo_marcador") if self.demo else db.get_costo_marcador(self.client, cid)
+        return self._d(cid, "costo_marcador") if self.demo else db.get_costo_marcador(cid)
 
     def historia(self):
-        return self.store["historia"] if self.demo else db.get_historia_gestores(self.client)
+        return self.store["historia"] if self.demo else db.get_historia_gestores()
 
     def comparativa(self):
         if not self.demo:
-            return db.get_comparativa(self.client)
+            return db.get_comparativa()
         camps = self.store["campaigns"]
         return {
             "campaigns": camps,

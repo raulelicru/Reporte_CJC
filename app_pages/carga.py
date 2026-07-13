@@ -55,13 +55,12 @@ def render():
     if ing is not None:
         _perfilado(ing)
         if not db.is_configured():
-            st.info("Supabase no está configurado: no se puede persistir. Rellena los secrets para confirmar la campaña.")
+            st.info("La base (Neon) no está configurada: no se puede persistir. Rellena DATABASE_URL en los secrets.")
         elif st.button("2 · Confirmar y calcular métricas", type="primary"):
             try:
                 m = compute_metrics(ing)
-                admin = db.admin_client()
                 prof = st.session_state.get("profile") or {}
-                cid = db.persist_campaign(admin, prof.get("org_id", db.DEFAULT_ORG),
+                cid = db.persist_campaign(prof.get("org_id", db.DEFAULT_ORG),
                                           st.session_state["carga_anio"], st.session_state["carga_nombre"],
                                           st.session_state.get("user_id"), ing, m,
                                           fecha_snapshot=st.session_state.get("carga_snapshot"))

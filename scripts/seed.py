@@ -86,13 +86,12 @@ def main():
 
 
 def _maybe_persist(items):
-    if not (os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY")):
-        print("\n(Supabase no configurado: no se persistió. Rellena .env / secrets para persistir.)")
+    if not os.environ.get("DATABASE_URL"):
+        print("\n(Neon no configurado: no se persistió. Rellena DATABASE_URL en .env / secrets para persistir.)")
         return
-    from cobranza.db import DEFAULT_ORG, admin_client, persist_campaign
-    db = admin_client()
+    from cobranza.db import DEFAULT_ORG, persist_campaign
     for anio, ing, m in items:
-        cid = persist_campaign(db, DEFAULT_ORG, anio, f"Campaña {anio}", None, ing, m)
+        cid = persist_campaign(DEFAULT_ORG, anio, f"Campaña {anio}", None, ing, m)
         print(f"✓ Persistida {anio} → {cid}")
 
 

@@ -2,15 +2,15 @@
 
 App **Streamlit + Python** que ingiere los 6 archivos de una campaña de cobranza
 Arabela, ejecuta un **motor de atribución con controles antifraude**, persiste en
-**Supabase (Postgres + Auth + RLS)** para **comparar campaña contra campaña**, y
-**clasifica a cada gestor** en un cuadrante de desarrollo de talento. Protegida
-con login por rol.
+**Neon (Postgres)** para **comparar campaña contra campaña** y guardar un
+**snapshot por día**, y **clasifica a cada gestor** en un cuadrante de desarrollo
+de talento. Protegida con login propio por rol (contraseña con hash bcrypt).
 
 La audiencia son gerentes y supervisores de cobranza: leen números, no código.
 
-> **Modo demo:** sin Supabase configurado, entra en *modo demo* desde el login y
-> explora toda la app con dos campañas sintéticas generadas al vuelo (misma
-> lógica que la producción).
+> **Modo demo:** sin base configurada, entra en *modo demo* desde el login y
+> explora toda la app con campañas sintéticas (varios snapshots diarios), misma
+> lógica que la producción.
 
 ---
 
@@ -29,32 +29,29 @@ En el login pulsa **“Entrar en modo demo”** para ver el dashboard sin backen
 
 ---
 
-## Conectar Supabase
+## Conectar Neon (Postgres)
 
-1. Crea un proyecto en [supabase.com](https://supabase.com).
-2. **Aplica las migraciones** de `supabase/migrations/` en orden (SQL Editor):
-   `0001_schema.sql` (esquema §5), `0002_rls.sql` (RLS), `0003_bootstrap.sql`
-   (organización por defecto + alta automática de perfiles).
-3. **Crea el bucket** `raw-campaigns` (privado) para auditoría de crudos (opcional).
-4. Copia `.streamlit/secrets.toml.example` a `.streamlit/secrets.toml` y rellena:
+1. Crea un proyecto en [neon.tech](https://neon.tech).
+2. **Aplica el esquema**: abre `db/schema.sql`, cópialo y pégalo en el
+   **SQL Editor** de Neon → **Run** (crea tablas, tabla `usuarios` para el login
+   y la organización por defecto; es idempotente).
+3. Copia la **cadena de conexión** de Neon (Dashboard → *Connect* → *Connection
+   string*, preferentemente la **pooled** con `?sslmode=require`).
+4. Copia `.streamlit/secrets.toml.example` a `.streamlit/secrets.toml` (o pégalo
+   en Streamlit Cloud → *Manage app → Settings → Secrets*) con una sola llave:
 
 | Secret | Uso |
 |---|---|
-| `SUPABASE_URL` | proyecto |
-| `SUPABASE_ANON_KEY` | login + lecturas (RLS aplica con la identidad del usuario) |
-| `SUPABASE_SERVICE_ROLE_KEY` | **solo servidor** — ingesta / recálculo (bypassa RLS) |
-| `SUPABASE_STORAGE_BUCKET` | bucket de crudos |
+| `DATABASE_URL` | cadena de conexión de Neon (usada por lecturas, ingesta y login) |
 
-   (`scripts/seed.py` lee las mismas llaves desde `.env` / variables de entorno.)
-5. Registra un usuario y **promuévelo a admin** una vez:
+   (`scripts/seed.py` lee la misma llave desde `.env` / variables de entorno.)
+5. **Primer administrador:** al entrar por primera vez con la base vacía, la
+   pantalla de login muestra el alta del **primer admin** (correo + contraseña).
+   No hace falta SQL manual. Usuarios adicionales se dan de alta con
+   `cobranza.db.create_user(...)` o insertando en `usuarios`.
 
-```sql
-update profiles set rol = 'admin'
-where user_id = (select id from auth.users where email = 'tu@correo.com');
-```
-
-El service-role key solo se usa en el servidor (`cobranza/db.py`), nunca se
-expone al navegador.
+`DATABASE_URL` solo se usa del lado servidor (`cobranza/db.py`); Streamlit corre
+en servidor, nunca se expone al navegador.
 
 ---
 

@@ -57,7 +57,7 @@ with st.sidebar:
     prof = st.session_state.get("profile") or {}
     st.caption(f'Rol: {prof.get("rol", "—")}{" · demo" if st.session_state.get("demo") else ""}')
     if st.button("Cerrar sesión", use_container_width=True):
-        for k in ["authed", "demo", "client", "store", "user_id", "profile", "cid"]:
+        for k in ["authed", "demo", "store", "user_id", "profile", "cid"]:
             st.session_state.pop(k, None)
         st.rerun()
 

@@ -1,9 +1,9 @@
-"""Capa de datos Supabase (§5, §7): auth, persistencia idempotente y lecturas.
+"""Capa de datos sobre Neon (Postgres puro) con psycopg.
 
-- El login usa Supabase Auth (email+contraseña) sobre un cliente anon; ese
-  mismo cliente aplica RLS en las lecturas con la identidad del usuario.
-- La ingesta/recálculo usa el service-role client (bypassa RLS), solo servidor.
-- Persistir una campaña REEMPLAZA sus filas (idempotencia por campaign_id).
+Sin Auth/RLS de Supabase: el login vive en la tabla `usuarios` (contraseña con
+hash bcrypt) y el aislamiento por organización se aplica en la app. La conexión
+usa DATABASE_URL (cadena de conexión de Neon). Persistir una campaña es
+idempotente por (org, anio_campania, fecha_snapshot): un snapshot por día.
 """
 from __future__ import annotations
 
@@ -11,7 +11,10 @@ import os
 from datetime import date as _date
 from typing import Any
 
-from supabase import Client, create_client
+import bcrypt
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 try:  # st.secrets es opcional (permite correr fuera de Streamlit)
     import streamlit as st
@@ -31,209 +34,274 @@ def _cfg(key: str) -> str | None:
     return os.environ.get(key)
 
 
+def _dsn() -> str | None:
+    return _cfg("DATABASE_URL")
+
+
 def is_configured() -> bool:
-    return bool(_cfg("SUPABASE_URL") and _cfg("SUPABASE_ANON_KEY"))
+    return bool(_dsn())
 
 
-def anon_client() -> Client:
-    return create_client(_cfg("SUPABASE_URL"), _cfg("SUPABASE_ANON_KEY"))
+def _conn() -> psycopg.Connection:
+    dsn = _dsn()
+    if not dsn:
+        raise RuntimeError("Falta DATABASE_URL (cadena de conexión de Neon). Ver .env.example.")
+    return psycopg.connect(dsn, row_factory=dict_row)
 
 
-def admin_client() -> Client:
-    url, key = _cfg("SUPABASE_URL"), _cfg("SUPABASE_SERVICE_ROLE_KEY")
-    if not url or not key:
-        raise RuntimeError("Faltan SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY (ver .env.example).")
-    return create_client(url, key)
+def _q(sql: str, params: tuple = (), fetch: str = "all") -> Any:
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        if fetch == "all":
+            return cur.fetchall()
+        if fetch == "one":
+            return cur.fetchone()
+        return None
 
 
-# ── Auth ──
-def sign_in(client: Client, email: str, password: str):
-    return client.auth.sign_in_with_password({"email": email, "password": password})
+# ── Auth (tabla usuarios, bcrypt) ──────────────────────────────────────────
+def count_users() -> int:
+    row = _q("select count(*) as n from usuarios", fetch="one")
+    return int(row["n"]) if row else 0
 
 
-def get_profile(client: Client, user_id: str) -> dict | None:
-    res = client.table("profiles").select("user_id, rol, equipo, nombre, org_id").eq("user_id", user_id).execute()
-    return res.data[0] if res.data else None
-
-
-# ── Lecturas (RLS aplica con el cliente autenticado) ──
-def get_campaigns(client: Client) -> list[dict]:
-    return (
-        client.table("campaigns")
-        .select("*")
-        .order("anio_campania", desc=True)
-        .order("fecha_snapshot", desc=True)
-        .execute()
-        .data
-        or []
+def create_user(email: str, password: str, rol: str = "admin",
+                nombre: str | None = None, org_id: str = DEFAULT_ORG) -> dict:
+    pw_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return _q(
+        """insert into usuarios (email, password_hash, rol, org_id, nombre)
+           values (%s, %s, %s, %s, %s)
+           on conflict (email) do update set password_hash = excluded.password_hash
+           returning id, email, rol, org_id, nombre""",
+        (email.strip().lower(), pw_hash, rol, org_id, nombre or email),
+        fetch="one",
     )
 
 
-def _rows(client: Client, table: str, campaign_id: str, order: str | None = None) -> list[dict]:
-    q = client.table(table).select("*").eq("campaign_id", campaign_id)
-    if order:
-        q = q.order(order)
-    return q.execute().data or []
+def sign_in(email: str, password: str) -> dict | None:
+    row = _q("select id, email, password_hash, rol, org_id, nombre from usuarios where email = %s",
+             (email.strip().lower(),), fetch="one")
+    if not row:
+        return None
+    ph = row["password_hash"]
+    ph = ph if isinstance(ph, bytes) else ph.encode()
+    if not bcrypt.checkpw(password.encode(), ph):
+        return None
+    return {"id": str(row["id"]), "email": row["email"], "rol": row["rol"],
+            "org_id": str(row["org_id"]), "nombre": row["nombre"]}
 
 
-def get_resumen(client, cid):
-    d = client.table("metrics_resumen").select("*").eq("campaign_id", cid).execute().data
-    return d[0] if d else None
+def get_profile(user_id: str) -> dict | None:
+    row = _q("select id as user_id, rol, org_id, nombre, equipo from usuarios where id = %s",
+             (user_id,), fetch="one")
+    if row:
+        row["org_id"] = str(row["org_id"])
+        row["user_id"] = str(row["user_id"])
+    return row
 
 
-def get_canal(client, cid):
-    return _rows(client, "metrics_canal", cid)
+# ── Lecturas ────────────────────────────────────────────────────────────────
+def get_campaigns() -> list[dict]:
+    rows = _q("""select id, org_id, anio_campania, nombre, fecha_snapshot, fecha_liberacion,
+                        fecha_corte_datos, saldo_asignado, deudas, consultoras, created_at
+                 from campaigns order by anio_campania desc, fecha_snapshot desc""")
+    return [_stringify_dates(r) for r in rows]
 
 
-def get_agentes(client, cid) -> list[dict]:
-    d = client.table("metrics_agente").select(
-        "*, agentes:agente_id(nombre_display), mentor:mentor_sugerido(nombre_display)"
-    ).eq("campaign_id", cid).execute().data or []
-    for a in d:
-        a["nombre"] = (a.get("agentes") or {}).get("nombre_display")
-        a["mentor_nombre"] = (a.get("mentor") or {}).get("nombre_display")
-    return d
+def _rows(table: str, cid: str, order: str | None = None) -> list[dict]:
+    sql = f"select * from {table} where campaign_id = %s" + (f" order by {order}" if order else "")
+    return [_stringify_dates(r) for r in _q(sql, (cid,))]
 
 
-def get_temporalidad(client, cid):
-    return _rows(client, "metrics_temporalidad", cid)
+def get_resumen(cid): return _one("metrics_resumen", cid)
+def get_canal(cid): return _rows("metrics_canal", cid)
+def get_temporalidad(cid): return _rows("metrics_temporalidad", cid)
+def get_diaria(cid): return _rows("metrics_diaria", cid, order="fecha")
+def get_secuencias(cid): return _rows("metrics_secuencia", cid)
+def get_quality_flags(cid): return _rows("quality_flags", cid)
+def get_costo_marcador(cid): return _one("costo_marcador", cid)
 
 
-def get_diaria(client, cid):
-    return _rows(client, "metrics_diaria", cid, order="fecha")
+def _one(table: str, cid: str) -> dict | None:
+    r = _q(f"select * from {table} where campaign_id = %s", (cid,), fetch="one")
+    return _stringify_dates(r) if r else None
 
 
-def get_secuencias(client, cid):
-    return _rows(client, "metrics_secuencia", cid)
+def get_agentes(cid: str) -> list[dict]:
+    rows = _q("""select ma.*, a.nombre_display as nombre, m.nombre_display as mentor_nombre
+                 from metrics_agente ma
+                 left join agentes a on a.id = ma.agente_id
+                 left join agentes m on m.id = ma.mentor_sugerido
+                 where ma.campaign_id = %s""", (cid,))
+    return [_stringify_dates(r) for r in rows]
 
 
-def get_quality_flags(client, cid):
-    return _rows(client, "quality_flags", cid)
-
-
-def get_costo_marcador(client, cid):
-    d = client.table("costo_marcador").select("*").eq("campaign_id", cid).execute().data
-    return d[0] if d else None
-
-
-def get_comparativa(client) -> dict:
-    camps = client.table("campaigns").select("*").order("anio_campania").order("fecha_snapshot").execute().data or []
-    resumenes = client.table("metrics_resumen").select("*").execute().data or []
-    canales = client.table("metrics_canal").select("*").execute().data or []
-    agentes = client.table("metrics_agente").select("campaign_id, pdp, pdp_cumplidas").execute().data or []
+def get_comparativa() -> dict:
+    camps = [_stringify_dates(r) for r in _q(
+        "select * from campaigns order by anio_campania, fecha_snapshot")]
+    resumenes = [_stringify_dates(r) for r in _q("select * from metrics_resumen")]
+    canales = _q("select * from metrics_canal")
+    agentes = _q("select campaign_id, pdp, pdp_cumplidas from metrics_agente")
     cumpl: dict[str, dict] = {}
     for a in agentes:
-        cur = cumpl.setdefault(a["campaign_id"], {"pdp": 0, "cumpl": 0})
+        cur = cumpl.setdefault(str(a["campaign_id"]), {"pdp": 0, "cumpl": 0})
         cur["pdp"] += a["pdp"] or 0
         cur["cumpl"] += a["pdp_cumplidas"] or 0
     cumplimiento = {k: (v["cumpl"] / v["pdp"] if v["pdp"] else 0.0) for k, v in cumpl.items()}
-    return {"campaigns": camps, "resumenes": resumenes, "canales": canales, "cumplimiento": cumplimiento}
+    return {"campaigns": camps, "resumenes": resumenes,
+            "canales": [_stringify_dates(c) for c in canales], "cumplimiento": cumplimiento}
 
 
-def get_historia_gestores(client) -> dict:
-    d = client.table("metrics_agente").select(
-        "tasa_contacto, pct_cumplimiento, clasificacion, agentes:agente_id(nombre_norm, nombre_display), campaigns:campaign_id(anio_campania, fecha_snapshot)"
-    ).execute().data or []
+def get_historia_gestores() -> dict:
+    rows = _q("""select ma.tasa_contacto, ma.pct_cumplimiento, ma.clasificacion,
+                        a.nombre_norm, a.nombre_display, c.anio_campania, c.fecha_snapshot
+                 from metrics_agente ma
+                 join agentes a on a.id = ma.agente_id
+                 join campaigns c on c.id = ma.campaign_id""")
     hist: dict[str, dict] = {}
-    for r in d:
-        ag = r.get("agentes") or {}
-        norm = ag.get("nombre_norm")
-        if not norm:
-            continue
-        camp = r.get("campaigns") or {}
-        # El eje de evolución es el día (snapshot); cae a anio_campania si falta.
-        etiqueta = camp.get("fecha_snapshot") or camp.get("anio_campania", "?")
-        entry = hist.setdefault(norm, {"display": ag.get("nombre_display") or norm, "puntos": []})
-        entry["puntos"].append({
-            "anio": etiqueta,
-            "contacto": r["tasa_contacto"], "cumplimiento": r["pct_cumplimiento"], "clasificacion": r["clasificacion"],
-        })
+    for r in rows:
+        norm = r["nombre_norm"]
+        etiqueta = (r["fecha_snapshot"].isoformat() if r.get("fecha_snapshot") else None) or r["anio_campania"] or "?"
+        entry = hist.setdefault(norm, {"display": r["nombre_display"] or norm, "puntos": []})
+        entry["puntos"].append({"anio": etiqueta, "contacto": float(r["tasa_contacto"]),
+                                "cumplimiento": float(r["pct_cumplimiento"]), "clasificacion": r["clasificacion"]})
     for e in hist.values():
         e["puntos"].sort(key=lambda x: x["anio"])
     return hist
 
 
-# ── Persistencia idempotente ──
-def _chunks(rows: list[dict], n: int = 1000):
-    for i in range(0, len(rows), n):
-        yield rows[i:i + n]
-
-
-def persist_campaign(db: Client, org_id: str, anio: str, nombre: str, cargado_por: str | None,
+# ── Persistencia idempotente (transacción única) ───────────────────────────
+def persist_campaign(org_id: str, anio: str, nombre: str, cargado_por: str | None,
                      ingest, metrics: dict, fecha_snapshot: str | None = None) -> str:
-    # Snapshot diario: la llave es (org, anio_campania, fecha_snapshot). Recargar
-    # el mismo día reemplaza esa foto; otro día crea una nueva (§ migración 0004).
     snapshot = fecha_snapshot or _date.today().isoformat()
-    camp = db.table("campaigns").upsert({
-        "org_id": org_id, "anio_campania": anio, "nombre": nombre,
-        "fecha_snapshot": snapshot,
-        "fecha_liberacion": ingest.profile.get("fecha_liberacion"),
-        "fecha_corte_datos": ingest.profile.get("fecha_corte_datos"),
-        "saldo_asignado": ingest.header["saldo_asignado"], "deudas": ingest.header["deudas"],
-        "consultoras": ingest.header["consultoras"], "cargado_por": cargado_por,
-    }, on_conflict="org_id,anio_campania,fecha_snapshot").execute().data
-    campaign_id = camp[0]["id"]
+    with _conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """insert into campaigns (org_id, anio_campania, nombre, fecha_snapshot,
+                   fecha_liberacion, fecha_corte_datos, saldo_asignado, deudas, consultoras, cargado_por)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               on conflict (org_id, anio_campania, fecha_snapshot) do update set
+                   nombre=excluded.nombre, fecha_liberacion=excluded.fecha_liberacion,
+                   fecha_corte_datos=excluded.fecha_corte_datos, saldo_asignado=excluded.saldo_asignado,
+                   deudas=excluded.deudas, consultoras=excluded.consultoras, cargado_por=excluded.cargado_por
+               returning id""",
+            (org_id, anio, nombre, snapshot, ingest.profile.get("fecha_liberacion"),
+             ingest.profile.get("fecha_corte_datos"), ingest.header["saldo_asignado"],
+             ingest.header["deudas"], ingest.header["consultoras"], cargado_por),
+        )
+        campaign_id = cur.fetchone()["id"]
 
-    for t in ["cartera", "pagos", "toques", "gestiones", "agentes", "costo_marcador",
-              "metrics_canal", "metrics_agente", "metrics_temporalidad", "metrics_diaria",
-              "metrics_secuencia", "metrics_resumen", "quality_flags"]:
-        db.table(t).delete().eq("campaign_id", campaign_id).execute()
+        for t in ["cartera", "pagos", "toques", "gestiones", "agentes", "costo_marcador",
+                  "metrics_canal", "metrics_agente", "metrics_temporalidad", "metrics_diaria",
+                  "metrics_secuencia", "metrics_resumen", "quality_flags"]:
+            cur.execute(f"delete from {t} where campaign_id = %s", (campaign_id,))
 
-    # agentes → id
-    agente_id: dict[str, str] = {}
-    if ingest.agentes:
-        rows = [{"campaign_id": campaign_id, "nombre_norm": a["nombre_norm"],
-                 "nombre_display": a["nombre_display"], "fuentes": a["fuentes"]} for a in ingest.agentes]
-        data = db.table("agentes").insert(rows).execute().data or []
-        agente_id = {r["nombre_norm"]: r["id"] for r in data}
+        # agentes → id
+        agente_id: dict[str, str] = {}
+        for a in ingest.agentes:
+            cur.execute("""insert into agentes (campaign_id, nombre_norm, nombre_display, fuentes)
+                           values (%s,%s,%s,%s) returning id, nombre_norm""",
+                        (campaign_id, a["nombre_norm"], a["nombre_display"], a["fuentes"]))
+            row = cur.fetchone()
+            agente_id[row["nombre_norm"]] = row["id"]
 
-    for ch in _chunks([{"campaign_id": campaign_id, "dama_deuda": c["dama_deuda"], "num_dama": c["num_dama"],
-                        "saldo_cobro": c["saldo_cobro"], "zona": c["zona"], "ruta": c["ruta"],
-                        "fecha_entrega": c["fecha_entrega"]} for c in ingest.cartera]):
-        db.table("cartera").insert(ch).execute()
-    for ch in _chunks([{"campaign_id": campaign_id, "dama_deuda": p["dama_deuda"], "num_dama": p["num_dama"],
-                        "id_cobrador": p["id_cobrador"], "fecha_pago": p["fecha_pago"],
-                        "saldo_remanente": p["saldo_remanente"], "estado_proceso": p["estado_proceso"],
-                        "recuperado": p["recuperado"]} for p in ingest.pagos]):
-        db.table("pagos").insert(ch).execute()
-    for ch in _chunks([{"campaign_id": campaign_id, "num_dama": t["num_dama"], "canal": t["canal"],
-                        "dia": t["dia"], "efectivo": t["efectivo"], "meta": t["meta"]} for t in ingest.toques]):
-        db.table("toques").insert(ch).execute()
-    for ch in _chunks([{"campaign_id": campaign_id, "agente_id": agente_id.get(g["agente_norm"]) if g["agente_norm"] else None,
-                        "num_dama": g["num_dama"], "fecha": g["fecha"], "tipo_gestion": g["tipo_gestion"],
-                        "tipificacion": g["tipificacion"], "promesa_fecha": g["promesa_fecha"],
-                        "monto_prometido": g["monto_prometido"], "temp": g["temp"]} for g in ingest.gestiones]):
-        db.table("gestiones").insert(ch).execute()
+        cur.executemany(
+            """insert into cartera (campaign_id, dama_deuda, num_dama, saldo_cobro, zona, ruta, fecha_entrega)
+               values (%s,%s,%s,%s,%s,%s,%s)""",
+            [(campaign_id, c["dama_deuda"], c["num_dama"], c["saldo_cobro"], c["zona"], c["ruta"], c["fecha_entrega"])
+             for c in ingest.cartera])
 
-    cm = ingest.profile["costo_marcador"]
-    db.table("costo_marcador").insert({"campaign_id": campaign_id, "llamadas": cm["llamadas"],
-                                       "minutos": cm["minutos"], "contactos_efectivos": cm["contactos_efectivos"]}).execute()
+        cur.executemany(
+            """insert into pagos (campaign_id, dama_deuda, num_dama, id_cobrador, fecha_pago,
+                   saldo_remanente, estado_proceso, recuperado) values (%s,%s,%s,%s,%s,%s,%s,%s)""",
+            [(campaign_id, p["dama_deuda"], p["num_dama"], p["id_cobrador"], p["fecha_pago"],
+              p["saldo_remanente"], p["estado_proceso"], p["recuperado"]) for p in ingest.pagos])
 
-    if metrics["canal"]:
-        db.table("metrics_canal").insert([{"campaign_id": campaign_id, "canal": m["canal"],
-            "monto_ultimo_toque": m["monto_ultimo_toque"], "pagos": m["pagos"], "consultoras": m["consultoras"],
-            "pct": m["pct"], "eficiencia_por_toque": m["eficiencia_por_toque"],
-            "influencia_monto": m["influencia_monto"], "influencia_pct": m["influencia_pct"]} for m in metrics["canal"]]).execute()
+        cur.executemany(
+            """insert into toques (campaign_id, num_dama, canal, dia, efectivo, meta)
+               values (%s,%s,%s,%s,%s,%s)""",
+            [(campaign_id, t["num_dama"], t["canal"], t["dia"], t["efectivo"], Jsonb(t["meta"]))
+             for t in ingest.toques])
 
-    if metrics["agentes"]:
-        db.table("metrics_agente").insert([{"campaign_id": campaign_id, "agente_id": agente_id.get(a["agente_id"]),
-            "gestiones": a["gestiones"], "contactos_efectivos": a["contactos_efectivos"], "tasa_contacto": a["tasa_contacto"],
-            "pdp": a["pdp"], "pdp_cumplidas": a["pdp_cumplidas"], "pct_cumplimiento": a["pct_cumplimiento"],
-            "recuperado_atribuido": a["recuperado_atribuido"], "pagadoras": 0, "clasificacion": a["clasificacion"],
-            "percentil_contacto": a["percentil_contacto"], "percentil_cumplimiento": a["percentil_cumplimiento"],
-            "mentor_sugerido": agente_id.get(a["mentor_sugerido"]) if a["mentor_sugerido"] else None}
-            for a in metrics["agentes"] if agente_id.get(a["agente_id"])]).execute()
+        cur.executemany(
+            """insert into gestiones (campaign_id, agente_id, num_dama, fecha, tipo_gestion,
+                   tipificacion, promesa_fecha, monto_prometido, temp) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            [(campaign_id, agente_id.get(g["agente_norm"]) if g["agente_norm"] else None,
+              g["num_dama"], g["fecha"], g["tipo_gestion"], g["tipificacion"], g["promesa_fecha"],
+              g["monto_prometido"], g["temp"]) for g in ingest.gestiones])
 
-    if metrics["temporalidad"]:
-        db.table("metrics_temporalidad").insert([{"campaign_id": campaign_id, **t} for t in metrics["temporalidad"]]).execute()
-    if metrics["diaria"]:
-        db.table("metrics_diaria").insert([{"campaign_id": campaign_id, **d} for d in metrics["diaria"]]).execute()
-    if metrics["secuencias"]:
-        db.table("metrics_secuencia").insert([{"campaign_id": campaign_id, **s} for s in metrics["secuencias"]]).execute()
+        cm = ingest.profile["costo_marcador"]
+        cur.execute("""insert into costo_marcador (campaign_id, llamadas, minutos, contactos_efectivos)
+                       values (%s,%s,%s,%s)""",
+                    (campaign_id, cm["llamadas"], cm["minutos"], cm["contactos_efectivos"]))
 
-    db.table("metrics_resumen").insert({"campaign_id": campaign_id, **metrics["resumen"]}).execute()
+        cur.executemany(
+            """insert into metrics_canal (campaign_id, canal, monto_ultimo_toque, pagos, consultoras,
+                   pct, eficiencia_por_toque, influencia_monto, influencia_pct)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            [(campaign_id, m["canal"], m["monto_ultimo_toque"], m["pagos"], m["consultoras"],
+              m["pct"], m["eficiencia_por_toque"], m["influencia_monto"], m["influencia_pct"])
+             for m in metrics["canal"]])
 
-    if ingest.flags:
-        db.table("quality_flags").insert([{"campaign_id": campaign_id, **f} for f in ingest.flags]).execute()
+        cur.executemany(
+            """insert into metrics_agente (campaign_id, agente_id, gestiones, contactos_efectivos,
+                   tasa_contacto, pdp, pdp_cumplidas, pct_cumplimiento, recuperado_atribuido, pagadoras,
+                   clasificacion, percentil_contacto, percentil_cumplimiento, mentor_sugerido)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            [(campaign_id, agente_id.get(a["agente_id"]), a["gestiones"], a["contactos_efectivos"],
+              a["tasa_contacto"], a["pdp"], a["pdp_cumplidas"], a["pct_cumplimiento"],
+              a["recuperado_atribuido"], 0, a["clasificacion"], a["percentil_contacto"],
+              a["percentil_cumplimiento"], agente_id.get(a["mentor_sugerido"]) if a["mentor_sugerido"] else None)
+             for a in metrics["agentes"] if agente_id.get(a["agente_id"])])
 
-    return campaign_id
+        cur.executemany(
+            """insert into metrics_temporalidad (campaign_id, temp, saldo, recuperado, tasa, deudas)
+               values (%s,%s,%s,%s,%s,%s)""",
+            [(campaign_id, t["temp"], t["saldo"], t["recuperado"], t["tasa"], t["deudas"])
+             for t in metrics["temporalidad"]])
+
+        cur.executemany(
+            """insert into metrics_diaria (campaign_id, fecha, recuperado, pagos, sms_enviados, es_blast, fuera_ventana)
+               values (%s,%s,%s,%s,%s,%s,%s)""",
+            [(campaign_id, d["fecha"], d["recuperado"], d["pagos"], d["sms_enviados"], d["es_blast"], d["fuera_ventana"])
+             for d in metrics["diaria"]])
+
+        cur.executemany(
+            """insert into metrics_secuencia (campaign_id, cadena, pagos, recuperado) values (%s,%s,%s,%s)""",
+            [(campaign_id, s["cadena"], s["pagos"], s["recuperado"]) for s in metrics["secuencias"]])
+
+        rr = metrics["resumen"]
+        cur.execute(
+            """insert into metrics_resumen (campaign_id, recuperado, saldo_asignado, pct_recuperado,
+                   deudas_liquidadas, saldo_pendiente, pct_pagos_sin_contacto, pct_espontaneo,
+                   pct_fuera_ventana, pct_cartera_no_contactada)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (campaign_id, rr["recuperado"], rr["saldo_asignado"], rr["pct_recuperado"],
+             rr["deudas_liquidadas"], rr["saldo_pendiente"], rr["pct_pagos_sin_contacto"],
+             rr["pct_espontaneo"], rr["pct_fuera_ventana"], rr["pct_cartera_no_contactada"]))
+
+        cur.executemany(
+            """insert into quality_flags (campaign_id, tipo, detalle, severidad) values (%s,%s,%s,%s)""",
+            [(campaign_id, f["tipo"], f["detalle"], f["severidad"]) for f in ingest.flags])
+
+        conn.commit()
+    return str(campaign_id)
+
+
+def _stringify_dates(row: dict | None) -> dict | None:
+    """Convierte date/UUID/Decimal a tipos JSON-friendly para la UI."""
+    if not row:
+        return row
+    from datetime import date, datetime
+    from decimal import Decimal
+    from uuid import UUID
+    out = {}
+    for k, v in row.items():
+        if isinstance(v, (date, datetime)):
+            out[k] = v.isoformat()
+        elif isinstance(v, Decimal):
+            out[k] = float(v)
+        elif isinstance(v, UUID):
+            out[k] = str(v)
+        else:
+            out[k] = v
+    return out

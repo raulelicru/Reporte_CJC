@@ -1,9 +1,9 @@
 # Dependencias de la app (Streamlit Community Cloud instala desde aquí).
 # Rangos, no pines exactos: dejan que el instalador de Cloud reconcilie con su
-# imagen base (que ya trae una versión reciente de streamlit) y elija wheels
-# compatibles con la versión de Python del entorno.
+# imagen base y elija wheels compatibles con la versión de Python del entorno.
 streamlit>=1.39
 pandas>=2.2,<3
 openpyxl>=3.1
-supabase>=2.9,<3
+psycopg[binary]>=3.2
+bcrypt>=4.1
 python-dotenv>=1.0
