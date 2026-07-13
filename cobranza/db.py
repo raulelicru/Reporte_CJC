@@ -222,12 +222,14 @@ def persist_campaign(org_id: str, anio: str, nombre: str, cargado_por: str | Non
             [(campaign_id, t["num_dama"], t["canal"], t["dia"], t["efectivo"], Jsonb(t["meta"]))
              for t in ingest.toques])
 
+        # Solo gestiones de un gestor humano (las ~94% 'Sistema' no aportan a las
+        # métricas —ya calculadas en memoria— ni las lee ninguna vista).
         cur.executemany(
             """insert into gestiones (campaign_id, agente_id, num_dama, fecha, tipo_gestion,
                    tipificacion, promesa_fecha, monto_prometido, temp) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-            [(campaign_id, agente_id.get(g["agente_norm"]) if g["agente_norm"] else None,
+            [(campaign_id, agente_id.get(g["agente_norm"]),
               g["num_dama"], g["fecha"], g["tipo_gestion"], g["tipificacion"], g["promesa_fecha"],
-              g["monto_prometido"], g["temp"]) for g in ingest.gestiones])
+              g["monto_prometido"], g["temp"]) for g in ingest.gestiones if g["agente_norm"]])
 
         cm = ingest.profile["costo_marcador"]
         cur.execute("""insert into costo_marcador (campaign_id, llamadas, minutos, contactos_efectivos)
