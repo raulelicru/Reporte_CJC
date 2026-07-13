@@ -13,7 +13,7 @@ def render():
     _, mid, _ = st.columns([1, 1.2, 1])
     with mid:
         st.markdown('<div style="text-align:center;margin-top:8vh">'
-                    '<div style="font-family:Fraunces,serif;font-size:1.8rem;font-weight:600">Arabela</div>'
+                    '<div style="font-family:Fraunces,serif;font-size:1.8rem;font-weight:600">Consultores CRZ</div>'
                     '<div class="eyebrow">Inteligencia de Cobranza</div></div>', unsafe_allow_html=True)
 
         configured = db.is_configured()

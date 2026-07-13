@@ -22,7 +22,7 @@ from app_pages import (
     tendencia,
 )
 
-st.set_page_config(page_title="Arabela · Cobranza", page_icon="◆", layout="wide")
+st.set_page_config(page_title="Consultores CRZ · Cobranza", page_icon="◆", layout="wide")
 theme.inject()
 
 # Estado inicial
@@ -36,7 +36,7 @@ if not st.session_state.get("authed"):
 
 # ── Sidebar: identidad + selector de campaña + logout ──
 with st.sidebar:
-    st.markdown('<div style="padding:4px 0 10px"><div style="font-family:Fraunces,serif;font-size:1.15rem;font-weight:600">Arabela</div>'
+    st.markdown('<div style="padding:4px 0 10px"><div style="font-family:Fraunces,serif;font-size:1.15rem;font-weight:600">Consultores CRZ</div>'
                 '<div class="eyebrow">Inteligencia de Cobranza</div></div>', unsafe_allow_html=True)
 
     actual, camps = ui.selected_campaign()
