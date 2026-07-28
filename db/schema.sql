@@ -42,6 +42,7 @@ create table if not exists campaigns (
   org_id             uuid not null references organizations(id) on delete cascade,
   anio_campania      text not null,
   nombre             text not null,
+  brand              text not null default 'arabela',
   fecha_snapshot     date not null default current_date,
   fecha_liberacion   date,
   fecha_corte_datos  date,
@@ -220,6 +221,13 @@ create table if not exists ingest_audit (
   sha256       text not null,
   filas        integer,
   created_at   timestamptz not null default now()
+);
+
+-- ── Analítica de estrategia (Fase A: hazard, esfuerzo-retorno, timing) ──
+create table if not exists analytics_estrategia (
+  campaign_id  uuid primary key references campaigns(id) on delete cascade,
+  payload      jsonb not null default '{}',
+  computed_at  timestamptz not null default now()
 );
 
 -- ── Organización por defecto ──

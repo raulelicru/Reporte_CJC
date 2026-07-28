@@ -98,6 +98,71 @@ def line_chart(labels: list[str], series: list[dict], height: int = 240, fmt=lam
     return f'<div style="overflow-x:auto">' + "".join(parts) + f'</div><div style="display:flex;gap:12px;margin-top:8px">{legend}</div>'
 
 
+def _mix(a: str, b: str, t: float) -> str:
+    """Interpola dos colores hex por t∈[0,1]."""
+    t = max(0.0, min(1.0, t))
+    ah = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    bh = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{int(ah[i] + (bh[i] - ah[i]) * t):02x}" for i in range(3))
+
+
+def heatmap_timing(celdas: list[dict]) -> str:
+    """Heatmap día-de-semana (7) × hora (0–23) coloreado por tasa de contacto."""
+    if not celdas:
+        return '<div style="color:#5A6472;font-size:.85rem">Sin datos de hora.</div>'
+    horas = sorted({c["hora"] for c in celdas})
+    h0, h1 = min(horas), max(horas)
+    cols = list(range(h0, h1 + 1))
+    by = {(c["dow"], c["hora"]): c for c in celdas}
+    dias = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    cw, ch, lx, ty = 30, 26, 40, 20
+    w = lx + len(cols) * cw + 10
+    h = ty + 7 * ch + 24
+    parts = [f'<svg width="{w}" height="{h}" role="img">']
+    for hi, hr in enumerate(cols):
+        if hr % 2 == 0:
+            parts.append(f'<text x="{lx + hi * cw + cw / 2:.0f}" y="{ty - 6}" text-anchor="middle" font-size="9" fill="#8A94A3">{hr}</text>')
+    for r in range(7):
+        parts.append(f'<text x="{lx - 6}" y="{ty + r * ch + ch / 2 + 3:.0f}" text-anchor="end" font-size="9" fill="#5A6472">{dias[r]}</text>')
+        for hi, hr in enumerate(cols):
+            c = by.get((r, hr))
+            x = lx + hi * cw
+            y = ty + r * ch
+            if not c or c["toques"] == 0:
+                fill = "#F1F0EB"
+            else:
+                fill = _mix("#F3E7C9", "#0E9F6E", c["tasa"])
+            title = f"{dias[r]} {hr}:00 — {c['tasa']*100:.0f}% ({c['efectivos']}/{c['toques']})" if c else f"{dias[r]} {hr}:00 — sin datos"
+            parts.append(f'<rect x="{x}" y="{y}" width="{cw - 2}" height="{ch - 2}" rx="2" fill="{fill}"><title>{html.escape(title)}</title></rect>')
+    parts.append(f'<text x="{lx}" y="{h - 6}" font-size="9" fill="#8A94A3">Verde = mayor tasa de contacto efectivo</text></svg>')
+    return f'<div style="overflow-x:auto">' + "".join(parts) + "</div>"
+
+
+def mirror_bars(rows: list[dict], left_key: str, right_key: str, label_key: str,
+                left_lbl: str, right_lbl: str, colors: dict | None = None) -> str:
+    """Barras espejo: reparto de esfuerzo (izq) vs reparto del dinero (der).
+    Es la tesis del informe en una imagen (rampa de antigüedad)."""
+    if not rows:
+        return ""
+    ramp = ["#0E9F6E", "#5FA88A", "#D9A21B", "#E2703A", "#B3312C", "#8A94A3"]
+    maxv = max([1e-9] + [max(r[left_key], r[right_key]) for r in rows])
+    out = ['<div class="panel">',
+           f'<div style="display:grid;grid-template-columns:1fr 120px 1fr;gap:8px;font-size:.7rem;color:#5A6472;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px">'
+           f'<div style="text-align:right">{html.escape(left_lbl)}</div><div style="text-align:center">Tramo</div><div>{html.escape(right_lbl)}</div></div>']
+    for i, r in enumerate(rows):
+        col = ramp[i % len(ramp)]
+        lw = r[left_key] / maxv * 100
+        rw = r[right_key] / maxv * 100
+        out.append(
+            f'<div style="display:grid;grid-template-columns:1fr 120px 1fr;gap:8px;align-items:center;padding:3px 0">'
+            f'<div style="display:flex;justify-content:flex-end"><div style="height:16px;width:{lw:.1f}%;background:{col};border-radius:3px 0 0 3px;opacity:.55"></div></div>'
+            f'<div style="text-align:center;font-size:.8rem">{html.escape(str(r[label_key]))}</div>'
+            f'<div><div style="height:16px;width:{rw:.1f}%;background:{col};border-radius:0 3px 3px 0"></div></div>'
+            f'</div>')
+    out.append("</div>")
+    return "".join(out)
+
+
 def quadrant_chart(agentes: list[dict], sel: str | None = None) -> str:
     """Cuadrante contacto × cumplimiento (SVG). agentes = dicts de metrics."""
     if not agentes:

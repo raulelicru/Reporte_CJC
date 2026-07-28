@@ -43,6 +43,7 @@ def _parse_promesa(val, fecha_hint: str | None) -> str | None:
 from .coerce import (
     norm_key,
     tiene_encoding_roto,
+    to_hour,
     to_int,
     to_iso_date,
     to_num,
@@ -105,18 +106,29 @@ def _min_iso(a, b):
     return a if a < b else b
 
 
-def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
-    """sheets = {cartera, pagos, gestiones, vicidial, ivr, sms} DataFrames."""
+def build_ingest(sheets: dict[str, pd.DataFrame], brand=None) -> IngestResult:
+    """sheets = {cartera, pagos, gestiones, vicidial, ivr, sms} DataFrames.
+
+    `brand` (cobranza.brands.Brand) aporta alias de columnas específicos de la
+    marca (Arabela/Natura); por defecto usa Arabela.
+    """
+    from .brands import DEFAULT_BRAND
+    brand = brand or DEFAULT_BRAND
     flags: list[dict] = []
+
+    def _merge(archivo: str, mapping: dict[str, list[str]]) -> dict[str, list[str]]:
+        # Candidatos de la marca primero, luego los base (compatibilidad).
+        extra = brand.aliases.get(archivo, {})
+        return {k: extra.get(k, []) + v for k, v in mapping.items()}
 
     # ── 1) Cartera (dedup por Dama-deuda, última FechaEntrega) ──
     df = sheets["cartera"]
-    cm = _colmap(df, {
+    cm = _colmap(df, _merge("cartera", {
         "num_dama": ["NumDama"], "anio": ["AnioCampaniaSaldo"],
         "dama_deuda": ["Dama-deuda", "DamaDeuda", "Dama_deuda"],
         "saldo_cobro": ["SaldoCobro"], "zona": ["NumeroZonaFacturacion", "zona"],
         "ruta": ["Ruta"], "fecha_entrega": ["FechaEntrega"],
-    })
+    }))
     cartera_by_key: dict[str, dict] = {}
     sin_llave = enc_roto = 0
     total_cartera = 0
@@ -152,12 +164,12 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
 
     # ── 2) Pagos (filtrados a cartera + recuperado) ──
     df = sheets["pagos"]
-    cm = _colmap(df, {
+    cm = _colmap(df, _merge("pagos", {
         "num_dama": ["NumDama"], "anio": ["AnioCampaniaSaldo"],
         "dama_deuda": ["Dama-deuda", "DamaDeuda"], "id_cobrador": ["IdCobrador"],
         "fecha_pago": ["FechaEntrega", "FechaPago"], "saldo_remanente": ["SaldoCampania", "SaldoRemanente"],
         "estado_proceso": ["EstadoProceso"],
-    })
+    }))
     pagos_by_key: dict[str, dict] = {}
     fuera_cartera = 0
     for row in _records(df, cm):
@@ -183,11 +195,11 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
 
     # ── 3) Gestiones (CRM) ──
     df = sheets["gestiones"]
-    cm = _colmap(df, {
+    cm = _colmap(df, _merge("gestiones", {
         "num_dama": ["CODIGO", "NumDama"], "gestor": ["NOMBRE GESTOR", "NOMBRE"], "fecha": ["FECHA"],
         "tipo_gestion": ["TIPO DE GESTION"], "tipificacion": ["TIPIFICACION", "TIPIFICACIlON"],
         "promesa": ["PROMESA", "DIA PROM"], "medicion": ["MEDICION"], "temp": ["temp"],
-    })
+    }))
     gestiones: list[dict] = []
     medicion_vacia = sin_fecha = sistema = 0
     for row in _records(df, cm):
@@ -209,7 +221,8 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
             norm = None
         gestiones.append({
             "num_dama": num_dama, "agente_norm": norm,
-            "agente_display": gestor, "fecha": fecha, "tipo_gestion": to_str(row.get("tipo_gestion")),
+            "agente_display": gestor, "fecha": fecha, "hora": to_hour(row.get("fecha")),
+            "tipo_gestion": to_str(row.get("tipo_gestion")),
             "tipificacion": to_str(row.get("tipificacion")),
             "promesa_fecha": _parse_promesa(row.get("promesa"), fecha),
             "monto_prometido": None, "temp": to_str(row.get("temp")),
@@ -225,9 +238,9 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
 
     # ── 4) Vicidial → roster + costo del marcador (C3) ──
     df = sheets["vicidial"]
-    cm = _colmap(df, {
+    cm = _colmap(df, _merge("vicidial", {
         "full_name": ["full_name"], "length_in_sec": ["length_in_sec"], "status_name": ["status_name", "status"],
-    })
+    }))
     agentes_vici: dict[str, str] = {}
     costo = {"llamadas": 0, "minutos": 0.0, "contactos_efectivos": 0}
     for row in _records(df, cm):
@@ -262,19 +275,20 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
         if not g["fecha"] or not g["agente_norm"]:
             continue
         toques.append({"num_dama": g["num_dama"], "canal": "Llamada", "dia": g["fecha"],
-                       "efectivo": gestion_efectiva(g["tipo_gestion"]), "meta": {"agente": g["agente_norm"]}})
+                       "efectivo": gestion_efectiva(g["tipo_gestion"]),
+                       "meta": {"agente": g["agente_norm"], "hora": g.get("hora")}})
 
     # IVR/Reminder: el export real viene en esquema Vicidial (call_date, No. Dama,
     # status_name). Se aceptan ambos formatos (spec y real).
     df = sheets["ivr"]
-    cm = _colmap(df, {
+    cm = _colmap(df, _merge("ivr", {
         "num_dama": ["Nodama", "No. Dama", "No Dama", "NoDama", "NumDama"],
         "fecha": ["Fecha de la Llamada", "call_date"],
         # Preferir la columna DESCRIPTIVA (status_name / Estado) sobre el código
         # terse (status = AB/AA/DROP), que no dice si conectó.
         "status": ["status_name", "Estado de la Llamada", "Estado Final", "Status"],
         "dtmf": ["Respuesta DTMF"],
-    })
+    }))
     ivr_sin_fecha = ivr_total = 0
     ivr_en_cartera = 0
     for row in _records(df, cm):
@@ -289,12 +303,13 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
         if num_dama in cartera_damas:
             ivr_en_cartera += 1
         toques.append({"num_dama": num_dama, "canal": "IVR", "dia": fecha,
-                       "efectivo": ivr_efectivo(to_str(row.get("status"))), "meta": {"dtmf": to_str(row.get("dtmf"))}})
+                       "efectivo": ivr_efectivo(to_str(row.get("status"))),
+                       "meta": {"dtmf": to_str(row.get("dtmf")), "hora": to_hour(row.get("fecha"))}})
     if ivr_sin_fecha > 0:
         _flag(flags, "ivr_sin_fecha", f"{ivr_sin_fecha} llamadas IVR sin fecha parseable — excluidas de atribución, contadas aparte.", "warn")
 
     df = sheets["sms"]
-    cm = _colmap(df, {"num_dama": ["Dama"], "fecha": ["Fecha Envio"], "descripcion": ["Descripcion"], "operador": ["Operador"]})
+    cm = _colmap(df, _merge("sms", {"num_dama": ["Dama"], "fecha": ["Fecha Envio"], "descripcion": ["Descripcion"], "operador": ["Operador"]}))
     sms_dama_nula = sms_total = sms_en_cartera = 0
     for row in _records(df, cm):
         sms_total += 1
@@ -308,7 +323,8 @@ def build_ingest(sheets: dict[str, pd.DataFrame]) -> IngestResult:
         if num_dama in cartera_damas:
             sms_en_cartera += 1
         toques.append({"num_dama": num_dama, "canal": "SMS", "dia": fecha,
-                       "efectivo": sms_efectivo(to_str(row.get("descripcion"))), "meta": {"operador": to_str(row.get("operador"))}})
+                       "efectivo": sms_efectivo(to_str(row.get("descripcion"))),
+                       "meta": {"operador": to_str(row.get("operador")), "hora": to_hour(row.get("fecha"))}})
     if sms_dama_nula > 0:
         _flag(flags, "sms_dama_nula", f"{sms_dama_nula} SMS con Dama no coercible a entero — descartados.")
 

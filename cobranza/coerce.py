@@ -72,6 +72,28 @@ def _from_yyyymmdd(s: str) -> str | None:
         return None
 
 
+def to_hour(value) -> int | None:
+    """Extrae la hora (0–23) de un datetime/Timestamp/string; None si no aplica.
+
+    Habilita el análisis de franja horaria: los crudos de Vicidial/IVR/SMS traen
+    timestamp con hora aunque la atribución use solo el día."""
+    if value is None or value == "":
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return int(value.hour)
+    s = str(value).strip()
+    m = re.search(r"\b(\d{1,2}):(\d{2})", s)
+    if m:
+        h = int(m.group(1))
+        return h if 0 <= h <= 23 else None
+    return None
+
+
 def to_int(value) -> int | None:
     """Coacciona a entero; None si vacío o no numérico (SMS Dama puede venir texto)."""
     if value is None or value == "":

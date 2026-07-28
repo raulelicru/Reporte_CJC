@@ -26,6 +26,10 @@ def render():
     ui.page_header("Solo admin", "Carga de datos",
                    "Sube los 6 archivos. Primero verás el perfilado y los flags de calidad; nada se persiste hasta que confirmas.")
 
+    from cobranza.brands import BRANDS
+    marca = st.radio("Marca", list(BRANDS.keys()), format_func=lambda b: BRANDS[b].nombre,
+                     horizontal=True, help="Arabela (dama) o Natura (consultora): cambia terminología y mapeo de columnas.")
+
     col1, col2, col3 = st.columns(3)
     anio = col1.text_input("AnioCampaniaSaldo", placeholder="2025C12")
     nombre = col2.text_input("Nombre", placeholder="Campaña 12 · 2025")
@@ -41,12 +45,14 @@ def render():
 
     if st.button("1 · Perfilar (sin guardar)", disabled=not (todos and anio)):
         try:
+            from cobranza.brands import get_brand
             sheets = {k: read_sheet(files[k]) for k, _ in CAMPOS}
-            ing = build_ingest(sheets)
+            ing = build_ingest(sheets, brand=get_brand(marca))
             st.session_state["carga_ing"] = ing
             st.session_state["carga_anio"] = anio
             st.session_state["carga_nombre"] = nombre or f"Campaña {anio}"
             st.session_state["carga_snapshot"] = snapshot.isoformat()
+            st.session_state["carga_brand"] = marca
         except Exception as e:
             st.error(f"Error al parsear: {e}")
             st.session_state.pop("carga_ing", None)
@@ -63,7 +69,8 @@ def render():
                 cid = db.persist_campaign(prof.get("org_id", db.DEFAULT_ORG),
                                           st.session_state["carga_anio"], st.session_state["carga_nombre"],
                                           st.session_state.get("user_id"), ing, m,
-                                          fecha_snapshot=st.session_state.get("carga_snapshot"))
+                                          fecha_snapshot=st.session_state.get("carga_snapshot"),
+                                          brand=st.session_state.get("carga_brand", "arabela"))
                 st.success(f"Snapshot del {st.session_state.get('carga_snapshot')} persistido ({cid}). Ve al Resumen ejecutivo.")
                 st.session_state["cid"] = cid
                 st.session_state.pop("carga_ing", None)

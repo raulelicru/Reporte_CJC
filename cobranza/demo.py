@@ -108,7 +108,7 @@ def build_demo() -> dict:
         m = compute_metrics(ing)
         cid = f"{anio}@{snap}"
         camp = {
-            "id": cid, "anio_campania": anio, "nombre": nombre, "fecha_snapshot": snap,
+            "id": cid, "anio_campania": anio, "nombre": nombre, "brand": "arabela", "fecha_snapshot": snap,
             "fecha_liberacion": ing.profile["fecha_liberacion"], "fecha_corte_datos": ing.profile["fecha_corte_datos"],
             "saldo_asignado": ing.header["saldo_asignado"], "deudas": ing.header["deudas"], "consultoras": ing.header["consultoras"],
         }
@@ -119,12 +119,14 @@ def build_demo() -> dict:
                   "influencia_monto": c["influencia_monto"], "influencia_pct": c["influencia_pct"]} for c in m["canal"]]
         agentes = [{**a, "nombre": a["nombre"], "mentor_nombre": _mentor_nombre(a, m["agentes"])} for a in m["agentes"]]
 
+        from .analytics import compute_estrategia
         data[cid] = {
             "resumen": m["resumen"], "canal": canal, "agentes": agentes,
             "temporalidad": m["temporalidad"], "diaria": m["diaria"], "secuencias": m["secuencias"],
             "flags": ing.flags, "costo_marcador": {"llamadas": ing.profile["costo_marcador"]["llamadas"],
                                                    "minutos": ing.profile["costo_marcador"]["minutos"],
                                                    "contactos_efectivos": ing.profile["costo_marcador"]["contactos_efectivos"]},
+            "estrategia": compute_estrategia(ing),
         }
         # Evolución del gestor por día (snapshot): solo la campaña principal.
         if anio == "2025C12":

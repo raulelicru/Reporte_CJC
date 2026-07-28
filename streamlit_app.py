@@ -11,6 +11,7 @@ from app_pages import (
     canales,
     carga,
     comparativa,
+    estrategia,
     gestionado,
     gestores,
     login,
@@ -48,8 +49,10 @@ with st.sidebar:
         cur_label = next((k for k, v in labels.items() if v == st.session_state["cid"]), list(labels.keys())[0])
         chosen = st.selectbox("Campaña · día (snapshot)", list(labels.keys()), index=list(labels.keys()).index(cur_label))
         st.session_state["cid"] = labels[chosen]
+        brand = ui.brand_of(actual)
         ui.campaign_badge(actual)
-        st.caption(f'Saldo {money_k(actual.get("saldo_asignado"))} · {num(actual.get("deudas"))} deudas · {num(actual.get("consultoras"))} consultoras')
+        st.markdown(f'<span class="chip" style="background:#EEF3FB;color:#2B5C9A;border-color:#CFE0F5">{brand.nombre}</span>', unsafe_allow_html=True)
+        st.caption(f'Saldo {money_k(actual.get("saldo_asignado"))} · {num(actual.get("deudas"))} deudas · {num(actual.get("consultoras"))} {brand.unidad_plural}')
     else:
         st.caption("No hay campañas cargadas. Usa Carga de datos o el modo demo.")
 
@@ -74,6 +77,7 @@ paginas = [
     _p(gestores.render, "Gestores", ":material/groups:", "gestores"),
     _p(temporalidad.render, "Temporalidad", ":material/schedule:", "temporalidad"),
     _p(tendencia.render, "Tendencia diaria", ":material/show_chart:", "tendencia"),
+    _p(estrategia.render, "Estrategia · analítica", ":material/insights:", "estrategia"),
     _p(comparativa.render, "Comparativa entre campañas", ":material/stacked_line_chart:", "comparativa"),
 ]
 if ui.is_admin():

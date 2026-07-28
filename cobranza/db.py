@@ -102,7 +102,7 @@ def get_profile(user_id: str) -> dict | None:
 
 # ── Lecturas ────────────────────────────────────────────────────────────────
 def get_campaigns() -> list[dict]:
-    rows = _q("""select id, org_id, anio_campania, nombre, fecha_snapshot, fecha_liberacion,
+    rows = _q("""select id, org_id, anio_campania, nombre, brand, fecha_snapshot, fecha_liberacion,
                         fecha_corte_datos, saldo_asignado, deudas, consultoras, created_at
                  from campaigns order by anio_campania desc, fecha_snapshot desc""")
     return [_stringify_dates(r) for r in rows]
@@ -172,19 +172,20 @@ def get_historia_gestores() -> dict:
 
 # ── Persistencia idempotente (transacción única) ───────────────────────────
 def persist_campaign(org_id: str, anio: str, nombre: str, cargado_por: str | None,
-                     ingest, metrics: dict, fecha_snapshot: str | None = None) -> str:
+                     ingest, metrics: dict, fecha_snapshot: str | None = None,
+                     brand: str = "arabela") -> str:
     snapshot = fecha_snapshot or _date.today().isoformat()
     with _conn() as conn, conn.cursor() as cur:
         cur.execute(
-            """insert into campaigns (org_id, anio_campania, nombre, fecha_snapshot,
+            """insert into campaigns (org_id, anio_campania, nombre, brand, fecha_snapshot,
                    fecha_liberacion, fecha_corte_datos, saldo_asignado, deudas, consultoras, cargado_por)
-               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+               values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                on conflict (org_id, anio_campania, fecha_snapshot) do update set
-                   nombre=excluded.nombre, fecha_liberacion=excluded.fecha_liberacion,
+                   nombre=excluded.nombre, brand=excluded.brand, fecha_liberacion=excluded.fecha_liberacion,
                    fecha_corte_datos=excluded.fecha_corte_datos, saldo_asignado=excluded.saldo_asignado,
                    deudas=excluded.deudas, consultoras=excluded.consultoras, cargado_por=excluded.cargado_por
                returning id""",
-            (org_id, anio, nombre, snapshot, ingest.profile.get("fecha_liberacion"),
+            (org_id, anio, nombre, brand, snapshot, ingest.profile.get("fecha_liberacion"),
              ingest.profile.get("fecha_corte_datos"), ingest.header["saldo_asignado"],
              ingest.header["deudas"], ingest.header["consultoras"], cargado_por),
         )
@@ -192,7 +193,7 @@ def persist_campaign(org_id: str, anio: str, nombre: str, cargado_por: str | Non
 
         for t in ["cartera", "pagos", "toques", "gestiones", "agentes", "costo_marcador",
                   "metrics_canal", "metrics_agente", "metrics_temporalidad", "metrics_diaria",
-                  "metrics_secuencia", "metrics_resumen", "quality_flags"]:
+                  "metrics_secuencia", "metrics_resumen", "quality_flags", "analytics_estrategia"]:
             cur.execute(f"delete from {t} where campaign_id = %s", (campaign_id,))
 
         # agentes → id
@@ -285,8 +286,21 @@ def persist_campaign(org_id: str, anio: str, nombre: str, cargado_por: str | Non
             """insert into quality_flags (campaign_id, tipo, detalle, severidad) values (%s,%s,%s,%s)""",
             [(campaign_id, f["tipo"], f["detalle"], f["severidad"]) for f in ingest.flags])
 
+        # Analítica de estrategia (hazard, esfuerzo-retorno, timing) → JSONB.
+        from .analytics import compute_estrategia
+        from .brands import get_brand
+        payload = compute_estrategia(ingest, get_brand(brand))
+        cur.execute(
+            "insert into analytics_estrategia (campaign_id, payload) values (%s,%s)",
+            (campaign_id, Jsonb(payload)))
+
         conn.commit()
     return str(campaign_id)
+
+
+def get_estrategia(cid: str) -> dict | None:
+    r = _q("select payload from analytics_estrategia where campaign_id = %s", (cid,), fetch="one")
+    return r["payload"] if r else None
 
 
 def _stringify_dates(row: dict | None) -> dict | None:

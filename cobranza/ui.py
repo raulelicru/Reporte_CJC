@@ -6,7 +6,13 @@ import html
 import streamlit as st
 
 from . import db
+from .brands import get_brand
 from .format import delta, dias_entre
+
+
+def brand_of(campaign):
+    """Marca (Arabela/Natura) de una campaña, para terminología y orden de tramos."""
+    return get_brand((campaign or {}).get("brand"))
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -52,6 +58,9 @@ class Data:
 
     def historia(self):
         return self.store["historia"] if self.demo else db.get_historia_gestores()
+
+    def estrategia(self, cid):
+        return self._d(cid, "estrategia") if self.demo else db.get_estrategia(cid)
 
     def comparativa(self):
         if not self.demo:

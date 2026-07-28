@@ -50,6 +50,24 @@ h1, h2, h3 {{ font-family: Fraunces, Georgia, serif; letter-spacing: -0.01em; co
 .chip-plan {{ background:#FDF1F4; color:#B03A5A; border-color:#F0C6D1; }}
 
 [data-testid="stSidebar"] {{ background: {PANEL}; border-right: 1px solid {LINE}; }}
+[data-testid="stSidebar"] .stButton button {{ border-radius: 8px; }}
+
+/* Chrome de Streamlit fuera: se ve como producto, no como demo. */
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"],
+[data-testid="stStatusWidget"], .stDeployButton, .stAppDeployButton {{ display: none !important; }}
+header[data-testid="stHeader"] {{ background: transparent; height: 0; }}
+.block-container {{ padding-top: 2.2rem; padding-bottom: 3rem; max-width: 1180px; }}
+
+/* Métricas nativas con la identidad. */
+[data-testid="stMetric"] {{ background: {PANEL}; border: 1px solid {LINE}; border-radius: 10px; padding: 12px 14px; }}
+[data-testid="stMetricValue"] {{ font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; font-size: 1.35rem; }}
+[data-testid="stMetricLabel"] {{ text-transform: uppercase; letter-spacing: .08em; font-size: .68rem; color: {INK70}; }}
+
+/* Tablas más de tablero. */
+[data-testid="stDataFrame"] {{ border-radius: 10px; overflow: hidden; border: 1px solid {LINE}; }}
+h1 {{ font-size: 1.9rem; }} h2 {{ font-size: 1.35rem; }} h3 {{ font-size: 1.08rem; }}
+hr {{ border-color: {LINE}; }}
+a {{ color: {TEAL}; }}
 </style>
 """
 

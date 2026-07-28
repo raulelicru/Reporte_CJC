@@ -9,7 +9,7 @@ from streamlit.testing.v1 import AppTest
 ROOT = Path(__file__).resolve().parents[1]
 APP = str(ROOT / "streamlit_app.py")
 PAGINAS = ["resumen", "canales", "promesas", "secuencias", "gestionado",
-           "gestores", "temporalidad", "tendencia", "comparativa", "carga", "metodologia"]
+           "gestores", "temporalidad", "tendencia", "estrategia", "comparativa", "carga", "metodologia"]
 
 
 def _demo_app(page="resumen"):
