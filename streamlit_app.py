@@ -14,6 +14,7 @@ from app_pages import (
     estrategia,
     gestionado,
     gestores,
+    informe,
     login,
     metodologia,
     modelos,
@@ -80,6 +81,7 @@ paginas = [
     _p(tendencia.render, "Tendencia diaria", ":material/show_chart:", "tendencia"),
     _p(estrategia.render, "Estrategia · analítica", ":material/insights:", "estrategia"),
     _p(modelos.render, "Modelos · roll-rate", ":material/account_tree:", "modelos"),
+    _p(informe.render, "Informe ejecutivo", ":material/description:", "informe"),
     _p(comparativa.render, "Comparativa entre campañas", ":material/stacked_line_chart:", "comparativa"),
 ]
 if ui.is_admin():

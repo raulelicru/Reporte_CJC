@@ -337,8 +337,8 @@ footer{grid-column:1/-1;padding:26px 40px;color:var(--muted);font-size:.8rem;bor
 _HTML = """<!doctype html><html lang="es"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{titulo}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" media="print" onload="this.media='all'"
+ href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;600&display=swap">
 <style>{css}</style></head><body>
 <div class="wrap">
 <header class="mast"><div class="eyebrow">{marca} · Inteligencia de Cobranza</div>
