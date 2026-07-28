@@ -7,6 +7,24 @@ from cobranza.charts import bar_list, heatmap_timing, mirror_bars
 from cobranza.format import money, money_k, num, pct
 
 
+def _descargar_informe(actual, e):
+    from cobranza.report import build_report_html
+    d = ui.data()
+    ctx = {
+        "brand": ui.brand_of(actual), "campaign": actual,
+        "resumen": d.resumen(actual["id"]), "canal": d.canal(actual["id"]),
+        "agentes": d.agentes(actual["id"]), "estrategia": e,
+    }
+    try:
+        html = build_report_html(ctx)
+    except Exception as ex:  # nunca romper la página por el informe
+        st.caption(f"Informe no disponible: {ex}")
+        return
+    nombre = f'informe_{actual.get("anio_campania","")}_{actual.get("fecha_snapshot","")}.html'
+    st.download_button("⬇ Descargar informe HTML", data=html, file_name=nombre,
+                       mime="text/html", type="primary")
+
+
 def render():
     actual, _ = ui.require_campaign()
     e = ui.data().estrategia(actual["id"])
@@ -17,6 +35,8 @@ def render():
     ui.page_header("Estrategia · analítica avanzada",
                    "¿Qué gestión produce el pago y dónde se desperdicia el esfuerzo?",
                    "Corregido por sesgo de truncamiento (panel día-a-día). Correlación controlada por tiempo en riesgo — no causa, pero honesto.")
+
+    _descargar_informe(actual, e)
 
     u = e["universo"]
     v = e["ventana"]
