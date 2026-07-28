@@ -16,6 +16,7 @@ from app_pages import (
     gestores,
     login,
     metodologia,
+    modelos,
     promesas,
     resumen,
     secuencias,
@@ -78,6 +79,7 @@ paginas = [
     _p(temporalidad.render, "Temporalidad", ":material/schedule:", "temporalidad"),
     _p(tendencia.render, "Tendencia diaria", ":material/show_chart:", "tendencia"),
     _p(estrategia.render, "Estrategia · analítica", ":material/insights:", "estrategia"),
+    _p(modelos.render, "Modelos · roll-rate", ":material/account_tree:", "modelos"),
     _p(comparativa.render, "Comparativa entre campañas", ":material/stacked_line_chart:", "comparativa"),
 ]
 if ui.is_admin():

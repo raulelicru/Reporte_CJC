@@ -94,6 +94,11 @@ def compute_estrategia(ing, brand=None, lookback: int = 2) -> dict[str, Any]:
     # ── Timing: día de semana × hora (contactabilidad) ──
     timing = _timing(ing.toques)
 
+    # ── Modelos (Fase B) ──
+    promesa_dama = {g["num_dama"] for g in ing.gestiones if g.get("promesa_fecha")}
+    modelos = compute_modelos(evaluables, ef_por_dama, pago_dia, recup, temp_dama,
+                              saldo, promesa_dama, brand, panel)
+
     return {
         "disponible": True,
         "ventana": {"inicio": inicio, "corte": corte, "lookback": lookback},
@@ -106,6 +111,9 @@ def compute_estrategia(ing, brand=None, lookback: int = 2) -> dict[str, Any]:
         "esfuerzo_retorno": esfuerzo,
         "reasignacion": reasignacion,
         "timing": timing,
+        "modelos": modelos,
+        # Mapa temporalidad por dama (para roll-rate entre snapshots).
+        "temp_por_dama": {str(d): temp_dama[d] for d in evaluables if d in temp_dama},
     }
 
 
@@ -227,6 +235,132 @@ def _reasignacion(esfuerzo, eficiencia_receptor=0.35):
         "sacrificada": sacrificada, "adicional": adicional, "neto": neto,
         "neto_pct": neto / total_r, "eficiencia_receptor": eficiencia_receptor,
     }
+
+
+def compute_modelos(evaluables, ef_por_dama, pago_dia, recup, temp_dama, saldo,
+                    promesa_dama, brand, panel) -> dict:
+    """Modelos (Fase B): logístico sobre el panel (efectos), logístico por dama
+    (scoring/deciles) y árbol con TASAS REALES por hoja. Guarda ante datos pobres."""
+    try:
+        import numpy as np
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.tree import DecisionTreeClassifier
+        from sklearn.metrics import roc_auc_score
+    except Exception:
+        return {"disponible": False, "motivo": "sklearn no disponible"}
+
+    out: dict = {"disponible": True}
+
+    # ── (a) Logístico sobre el PANEL (válido para efectos, a igual día de riesgo) ──
+    if len(panel) >= 200:
+        Xp = np.array([[f["dosis_prev"], f["Llamada"], f["IVR"], f["SMS"]] for f in panel], float)
+        yp = np.array([f["pago"] for f in panel])
+        if yp.sum() >= 10 and (yp == 0).sum() >= 10:
+            m = LogisticRegression(class_weight="balanced", max_iter=1000)
+            m.fit(Xp, yp)
+            try:
+                auc = float(roc_auc_score(yp, m.predict_proba(Xp)[:, 1]))
+            except Exception:
+                auc = None
+            nombres = ["Dosis previa (+1)", "Llamada en ventana", "IVR en ventana", "SMS en ventana"]
+            out["panel"] = {"auc": auc, "n": len(panel),
+                            "odds": [{"var": n, "or": float(np.exp(c))}
+                                     for n, c in zip(nombres, m.coef_[0])]}
+
+    # ── Matriz de features por dama (para scoring/deciles/árbol) ──
+    feats, ys, ids = [], [], []
+    FN = ["gestiones", "llamadas", "ivr", "sms", "dias_tocados", "promesa", "saldo", "temp_rank"]
+    for d in evaluables:
+        toques = ef_por_dama.get(d, [])
+        nll = sum(1 for t in toques if t["canal"] == "Llamada")
+        niv = sum(1 for t in toques if t["canal"] == "IVR")
+        nsm = sum(1 for t in toques if t["canal"] == "SMS")
+        dias = len({t["dia"] for t in toques})
+        tr = temp_rank(brand, temp_dama.get(d))
+        feats.append([len(toques), nll, niv, nsm, dias, int(d in promesa_dama),
+                      float(saldo.get(d, 0.0)), tr if tr >= 0 else 0])
+        ys.append(1 if d in pago_dia else 0)
+        ids.append(d)
+    X = np.array(feats, float)
+    y = np.array(ys)
+
+    if len(y) >= 100 and y.sum() >= 20 and (y == 0).sum() >= 20:
+        # ── (b) Logístico por dama → deciles con esfuerzo aplicado ──
+        md = LogisticRegression(class_weight="balanced", max_iter=1000)
+        md.fit(X, y)
+        proba = md.predict_proba(X)[:, 1]
+        try:
+            out["dama_auc"] = float(roc_auc_score(y, proba))
+        except Exception:
+            out["dama_auc"] = None
+        orden = np.argsort(-proba)
+        deciles = []
+        n = len(orden)
+        for k in range(10):
+            idx = orden[int(k * n / 10):int((k + 1) * n / 10)]
+            if len(idx) == 0:
+                continue
+            deciles.append({"decil": k + 1, "damas": int(len(idx)),
+                            "tasa_pago": float(y[idx].mean()),
+                            "gestiones_prom": float(X[idx, 0].mean())})
+        out["deciles"] = deciles
+
+        # ── (c) Árbol (depth 3) con TASAS REALES por hoja ──
+        tree = DecisionTreeClassifier(max_depth=3, min_samples_leaf=max(50, len(y) // 40),
+                                      class_weight="balanced", random_state=0)
+        tree.fit(X, y)
+        out["arbol"] = _reglas_arbol(tree, FN, X, y)
+
+    return out
+
+
+def _reglas_arbol(tree, feat_names, X, y):
+    """Extrae reglas por hoja con la tasa de pago REAL (no la balanceada de tree_.value)."""
+    import numpy as np
+    t = tree.tree_
+    hojas = tree.apply(X)
+    reglas = []
+
+    def recorre(nodo, cond):
+        if t.children_left[nodo] == t.children_right[nodo]:  # hoja
+            mask = hojas == nodo
+            n = int(mask.sum())
+            if n == 0:
+                return
+            reglas.append({"condiciones": cond, "n": n, "tasa_real": float(y[mask].mean())})
+            return
+        f = feat_names[t.feature[nodo]]
+        thr = float(t.threshold[nodo])
+        recorre(t.children_left[nodo], cond + [f"{f} ≤ {thr:.1f}"])
+        recorre(t.children_right[nodo], cond + [f"{f} > {thr:.1f}"])
+
+    recorre(0, [])
+    reglas.sort(key=lambda r: -r["tasa_real"])
+    return reglas
+
+
+def roll_rate(temp_prev: dict, temp_cur: dict, brand) -> dict:
+    """Matriz de transición de temporalidad entre dos snapshots (roll-rate)."""
+    if not temp_prev or not temp_cur:
+        return {"disponible": False}
+    tramos = list(brand.temporalidades)
+    comunes = set(temp_prev) & set(temp_cur)
+    if not comunes:
+        return {"disponible": False}
+    matriz = {a: {b: 0 for b in tramos + ["(otro)"]} for a in tramos + ["(otro)"]}
+    for d in comunes:
+        a = temp_prev[d] if temp_prev[d] in tramos else "(otro)"
+        b = temp_cur[d] if temp_cur[d] in tramos else "(otro)"
+        matriz[a][b] += 1
+    filas = []
+    for a in tramos + ["(otro)"]:
+        total = sum(matriz[a].values())
+        if total == 0:
+            continue
+        filas.append({"desde": a, "total": total,
+                      "destinos": [{"hacia": b, "n": matriz[a][b], "pct": matriz[a][b] / total}
+                                   for b in tramos + ["(otro)"] if matriz[a][b] > 0]})
+    return {"disponible": True, "filas": filas, "damas": len(comunes)}
 
 
 def _timing(toques):
