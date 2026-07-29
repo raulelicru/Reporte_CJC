@@ -27,8 +27,12 @@ def render():
                    "Sube los 6 archivos. Primero verás el perfilado y los flags de calidad; nada se persiste hasta que confirmas.")
 
     from cobranza.brands import BRANDS
-    marca = st.radio("Marca", list(BRANDS.keys()), format_func=lambda b: BRANDS[b].nombre,
-                     horizontal=True, help="Arabela (dama) o Natura (consultora): cambia terminología y mapeo de columnas.")
+    _ids = list(BRANDS.keys())
+    _def = ui.active_brand_id()
+    marca = st.radio("Marca", _ids, index=_ids.index(_def) if _def in _ids else 0,
+                     format_func=lambda b: BRANDS[b].nombre, horizontal=True,
+                     help="Arabela (dama) o Natura (consultora): cambia terminología y mapeo de columnas. "
+                          "Se guarda bajo el apartado elegido — los datos no se mezclan entre marcas.")
 
     col1, col2, col3 = st.columns(3)
     anio = col1.text_input("AnioCampaniaSaldo", placeholder="2025C12")

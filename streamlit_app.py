@@ -37,10 +37,17 @@ if not st.session_state.get("authed"):
     login.render()
     st.stop()
 
-# ── Sidebar: identidad + selector de campaña + logout ──
+# ── Sidebar: identidad + apartado de marca + selector de campaña + logout ──
 with st.sidebar:
     st.markdown('<div style="padding:4px 0 10px"><div style="font-family:Fraunces,serif;font-size:1.15rem;font-weight:600">Consultores CRZ</div>'
                 '<div class="eyebrow">Inteligencia de Cobranza</div></div>', unsafe_allow_html=True)
+
+    # Apartado de marca (arriba): Arabela | Natura — aislados, nada se mezcla.
+    st.markdown('<div class="eyebrow" style="margin:2px 0 4px">Apartado</div>', unsafe_allow_html=True)
+    brand = ui.brand_switcher()
+    st.markdown(f'<div class="brand-hero brand-{brand.id}"><span class="brand-name">{brand.nombre}</span>'
+                f'<span class="brand-unit">{brand.unidad_plural}</span></div>', unsafe_allow_html=True)
+    st.divider()
 
     actual, camps = ui.selected_campaign()
     if camps:
@@ -51,12 +58,10 @@ with st.sidebar:
         cur_label = next((k for k, v in labels.items() if v == st.session_state["cid"]), list(labels.keys())[0])
         chosen = st.selectbox("Campaña · día (snapshot)", list(labels.keys()), index=list(labels.keys()).index(cur_label))
         st.session_state["cid"] = labels[chosen]
-        brand = ui.brand_of(actual)
         ui.campaign_badge(actual)
-        st.markdown(f'<span class="chip" style="background:#EEF3FB;color:#2B5C9A;border-color:#CFE0F5">{brand.nombre}</span>', unsafe_allow_html=True)
         st.caption(f'Saldo {money_k(actual.get("saldo_asignado"))} · {num(actual.get("deudas"))} deudas · {num(actual.get("consultoras"))} {brand.unidad_plural}')
     else:
-        st.caption("No hay campañas cargadas. Usa Carga de datos o el modo demo.")
+        st.info(f"Sin campañas en **{brand.nombre}** todavía. Cárgalas en Carga de datos (se guardan bajo este apartado) o usa el modo demo.")
 
     st.divider()
     prof = st.session_state.get("profile") or {}

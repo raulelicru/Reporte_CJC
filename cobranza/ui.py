@@ -6,13 +6,65 @@ import html
 import streamlit as st
 
 from . import db
-from .brands import get_brand
+from .brands import BRANDS, DEFAULT_BRAND, get_brand
 from .format import delta, dias_entre
 
 
 def brand_of(campaign):
     """Marca (Arabela/Natura) de una campaña, para terminología y orden de tramos."""
     return get_brand((campaign or {}).get("brand"))
+
+
+def _campaign_brand_id(c) -> str:
+    return ((c or {}).get("brand") or "arabela").lower()
+
+
+def active_brand_id() -> str:
+    """Marca activa (apartado seleccionado arriba). Nunca None."""
+    return (st.session_state.get("active_brand") or DEFAULT_BRAND.id).lower()
+
+
+def active_brand():
+    return get_brand(active_brand_id())
+
+
+def brand_switcher():
+    """Selector de marca en la parte superior: Arabela | Natura.
+
+    Cada marca es un apartado aislado — al cambiar se suelta la campaña de la
+    otra marca para que NADA se mezcle. Devuelve la Brand activa.
+    """
+    marcas = list(BRANDS.values())
+    nombres = [b.nombre for b in marcas]
+    ids = [b.id for b in marcas]
+    cur = active_brand_id()
+    idx = ids.index(cur) if cur in ids else 0
+
+    # Conteo por marca (para que el apartado vacío se note sin mezclar datos).
+    todas = data().campaigns() or []
+    conteo = {b.id: sum(1 for c in todas if _campaign_brand_id(c) == b.id) for b in marcas}
+    etiquetas = [f"{n}" for n in nombres]
+
+    seg = getattr(st, "segmented_control", None)
+    if seg is not None:
+        chosen = seg("Marca", etiquetas, default=etiquetas[idx], label_visibility="collapsed")
+    else:
+        chosen = st.radio("Marca", etiquetas, index=idx, horizontal=True, label_visibility="collapsed")
+    if not chosen:
+        chosen = etiquetas[idx]
+    new_id = ids[etiquetas.index(chosen)]
+    if new_id != cur:
+        st.session_state["active_brand"] = new_id
+        st.session_state["cid"] = None  # nada se mezcla: soltar la campaña de la otra marca
+        st.rerun()
+    st.session_state["active_brand"] = new_id
+    st.caption(f'{conteo.get(new_id, 0)} campaña(s) en {get_brand(new_id).nombre}')
+    return get_brand(new_id)
+
+
+def campaigns_de_marca():
+    """Campañas SOLO de la marca activa (aislamiento entre apartados)."""
+    return [c for c in (data().campaigns() or []) if _campaign_brand_id(c) == active_brand_id()]
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -63,6 +115,18 @@ class Data:
         return self._d(cid, "estrategia") if self.demo else db.get_estrategia(cid)
 
     def comparativa(self):
+        comp = self._comparativa_raw()
+        # Aislar por marca activa: la comparativa no cruza Arabela con Natura.
+        bid = active_brand_id()
+        ids = {c["id"] for c in comp["campaigns"] if _campaign_brand_id(c) == bid}
+        return {
+            "campaigns": [c for c in comp["campaigns"] if c["id"] in ids],
+            "resumenes": [r for r in comp["resumenes"] if r.get("campaign_id") in ids],
+            "canales": [r for r in comp["canales"] if r.get("campaign_id") in ids],
+            "cumplimiento": {k: v for k, v in comp["cumplimiento"].items() if k in ids},
+        }
+
+    def _comparativa_raw(self):
         if not self.demo:
             return db.get_comparativa()
         camps = self.store["campaigns"]
@@ -98,8 +162,8 @@ def data() -> Data:
 
 
 def selected_campaign():
-    d = data()
-    camps = d.campaigns()
+    # Solo campañas de la marca activa: los apartados no se mezclan.
+    camps = campaigns_de_marca()
     if not camps:
         return None, camps
     cid = st.session_state.get("cid")

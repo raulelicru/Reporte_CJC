@@ -11,6 +11,7 @@ from .metrics import compute_metrics
 
 AGENTES = ["María Pérez", "Juan Gómez", "Ana Ruiz", "Luis Torres", "Sofía Díaz"]
 TEMPS = ["Mora 1", "Mora 2", "Mora 3", "MNI", "IM"]
+TEMPS_NATURA = ["Al corriente", "Mora 1", "Mora 2", "Mora 3", "Castigo"]
 
 
 def _rng(seed: int):
@@ -24,15 +25,16 @@ def _rng(seed: int):
     return nxt
 
 
-def synth(anio: str, seed: int) -> dict[str, pd.DataFrame]:
+def synth(anio: str, seed: int, temps: list[str] | None = None, proyecto: str = "Arabela") -> dict[str, pd.DataFrame]:
     r = _rng(seed)
+    temps = temps or TEMPS
     N = 60
     cartera, pagos, gestiones, vicidial, ivr, sms = [], [], [], [], [], []
     for i in range(N):
         num = 100000 + i + seed * 1000
         dama = f"{num}-{anio}"
         saldo = round(500 + r() * 4500)
-        temp = TEMPS[int(r() * len(TEMPS))]
+        temp = temps[int(r() * len(temps))]
         cartera.append({"FechaEntrega": 20250601, "NumDama": num, "AnioCampaniaSaldo": anio,
                         "SaldoCobro": saldo, "NumeroZonaFacturacion": f"Z{i % 5 + 1}", "Ruta": f"R{i % 9 + 1}", "Dama-deuda": dama})
         ultimo = None
@@ -63,7 +65,7 @@ def synth(anio: str, seed: int) -> dict[str, pd.DataFrame]:
             ok = r() < 0.9
             if ok:
                 ultimo = max(ultimo or 0, dia)
-            sms.append({"Proyecto": "Arabela", "Fecha Base": "2025-06-01", "Telefono": "55", "Dama": num,
+            sms.append({"Proyecto": proyecto, "Fecha Base": "2025-06-01", "Telefono": "55", "Dama": num,
                         "Fecha Envio": f"2025-06-{dia:02d} 08:00:00", "Costo": 0.25, "Mensajes Enviados": 1,
                         "Descripcion": "Exitoso" if ok else "Fallido", "Operador": "Telcel"})
         if r() < 0.45:
@@ -94,21 +96,31 @@ def build_demo() -> dict:
     data: dict[str, dict] = {}
     hist_puntos: dict[str, dict] = {}
 
-    # Snapshots DIARIOS: la campaña 2025C12 se carga varios días conforme madura,
-    # más un segundo día de otra campaña para la comparativa cruzada.
+    # Snapshots DIARIOS por apartado (marca). Arabela con varios días de la misma
+    # campaña + otra campaña para la comparativa; Natura como apartado aislado.
+    # Nada se mezcla entre marcas: cada snapshot lleva su brand.
     SNAPSHOTS = [
-        ("2025C12", "2025-06-26", 120, "Campaña 12 · 2025"),
-        ("2025C12", "2025-06-27", 121, "Campaña 12 · 2025"),
-        ("2025C12", "2025-06-28", 122, "Campaña 12 · 2025"),
-        ("2025C13", "2025-06-28", 130, "Campaña 13 · 2025"),
+        ("arabela", "2025C12", "2025-06-26", 120, "Campaña 12 · 2025"),
+        ("arabela", "2025C12", "2025-06-27", 121, "Campaña 12 · 2025"),
+        ("arabela", "2025C12", "2025-06-28", 122, "Campaña 12 · 2025"),
+        ("arabela", "2025C13", "2025-06-28", 130, "Campaña 13 · 2025"),
+        ("natura", "2025C08", "2025-06-27", 240, "Ciclo 08 · 2025"),
+        ("natura", "2025C08", "2025-06-28", 241, "Ciclo 08 · 2025"),
     ]
 
-    for anio, snap, seed, nombre in SNAPSHOTS:
-        ing = build_ingest(synth(anio, seed))
+    from .brands import get_brand
+    for marca, anio, snap, seed, nombre in SNAPSHOTS:
+        brand = get_brand(marca)
+        es_natura = marca == "natura"
+        ing = build_ingest(
+            synth(anio, seed, temps=TEMPS_NATURA if es_natura else TEMPS,
+                  proyecto=brand.nombre),
+            brand=brand,
+        )
         m = compute_metrics(ing)
-        cid = f"{anio}@{snap}"
+        cid = f"{marca}:{anio}@{snap}"
         camp = {
-            "id": cid, "anio_campania": anio, "nombre": nombre, "brand": "arabela", "fecha_snapshot": snap,
+            "id": cid, "anio_campania": anio, "nombre": nombre, "brand": marca, "fecha_snapshot": snap,
             "fecha_liberacion": ing.profile["fecha_liberacion"], "fecha_corte_datos": ing.profile["fecha_corte_datos"],
             "saldo_asignado": ing.header["saldo_asignado"], "deudas": ing.header["deudas"], "consultoras": ing.header["consultoras"],
         }
@@ -126,10 +138,10 @@ def build_demo() -> dict:
             "flags": ing.flags, "costo_marcador": {"llamadas": ing.profile["costo_marcador"]["llamadas"],
                                                    "minutos": ing.profile["costo_marcador"]["minutos"],
                                                    "contactos_efectivos": ing.profile["costo_marcador"]["contactos_efectivos"]},
-            "estrategia": compute_estrategia(ing),
+            "estrategia": compute_estrategia(ing, brand),
         }
-        # Evolución del gestor por día (snapshot): solo la campaña principal.
-        if anio == "2025C12":
+        # Evolución del gestor por día (snapshot): solo la campaña principal Arabela.
+        if marca == "arabela" and anio == "2025C12":
             for a in m["agentes"]:
                 entry = hist_puntos.setdefault(a["agente_id"], {"display": a["nombre"], "puntos": []})
                 entry["puntos"].append({"anio": snap, "contacto": a["tasa_contacto"],

@@ -27,14 +27,43 @@ h1, h2, h3 {{ font-family: Fraunces, Georgia, serif; letter-spacing: -0.01em; co
 .num, .tabular {{ font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }}
 .eyebrow {{ font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: {INK70}; font-weight: 600; }}
 
-.panel {{ background: {PANEL}; border: 1px solid {LINE}; border-radius: 10px; padding: 16px; }}
+/* ── Animaciones (la app respira, sin marear) ── */
+@keyframes fadeUp {{ from {{ opacity: 0; transform: translateY(10px); }} to {{ opacity: 1; transform: none; }} }}
+@keyframes growX {{ from {{ transform: scaleX(0); }} to {{ transform: scaleX(1); }} }}
+@keyframes popIn {{ 0% {{ opacity: 0; transform: scale(.96); }} 100% {{ opacity: 1; transform: scale(1); }} }}
+@keyframes shimmer {{ 0% {{ background-position: -180% 0; }} 100% {{ background-position: 180% 0; }} }}
+
+.panel {{ background: {PANEL}; border: 1px solid {LINE}; border-radius: 10px; padding: 16px;
+          animation: fadeUp .5s cubic-bezier(.2,.7,.2,1) both;
+          transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }}
+.panel:hover {{ transform: translateY(-2px); box-shadow: 0 10px 26px -14px rgba(22,32,46,.28); border-color: #D3DAE3; }}
 .kpi-val {{ font-family: 'JetBrains Mono', monospace; font-variant-numeric: tabular-nums; font-size: 1.6rem; font-weight: 600; }}
 
 .bar-row {{ display: grid; grid-template-columns: 140px 1fr auto; align-items: center; gap: 12px; padding: 6px 0; }}
 .bar-track {{ position: relative; height: 22px; background: #F1F0EB; border-radius: 5px; overflow: hidden; }}
-.bar-fill {{ position: absolute; top:0; bottom:0; left:0; border-radius: 5px; }}
+.bar-fill {{ position: absolute; top:0; bottom:0; left:0; border-radius: 5px;
+             transform-origin: left center; animation: growX .7s cubic-bezier(.2,.8,.2,1) both; }}
 .fill-llamada {{ background: {AMBER}; }} .fill-ivr {{ background: {ROSE}; }}
 .fill-sms {{ background: {TEAL}; }} .fill-espontaneo {{ background: {GRAY}; }}
+
+/* Entrada escalonada de bloques principales (métricas, tablas, gráficos). */
+[data-testid="stMetric"], [data-testid="stDataFrame"], [data-testid="stVerticalBlockBorderWrapper"],
+.stPlotlyChart, [data-testid="stImage"], [data-testid="stMarkdownContainer"] > svg {{
+    animation: fadeUp .5s cubic-bezier(.2,.7,.2,1) both;
+}}
+[data-testid="stMetric"] {{ transition: transform .18s ease, box-shadow .18s ease; }}
+[data-testid="stMetric"]:hover {{ transform: translateY(-2px); box-shadow: 0 10px 24px -16px rgba(22,32,46,.30); }}
+svg rect, svg circle {{ transition: opacity .18s ease; }}
+svg:hover rect:hover, svg:hover circle:hover {{ opacity: .82; }}
+
+/* ── Apartado de marca (Arabela / Natura) ── */
+.brand-hero {{ margin-top: 6px; padding: 12px 14px; border-radius: 12px; color: #fff;
+               display: flex; flex-direction: column; gap: 2px; animation: popIn .38s ease both;
+               box-shadow: 0 8px 22px -14px rgba(22,32,46,.5); }}
+.brand-hero .brand-name {{ font-family: Fraunces, serif; font-size: 1.15rem; font-weight: 600; letter-spacing: -.01em; }}
+.brand-hero .brand-unit {{ font-size: .68rem; letter-spacing: .14em; text-transform: uppercase; opacity: .85; }}
+.brand-arabela {{ background: linear-gradient(120deg, #B23A6B 0%, #7C2D8A 100%); }}
+.brand-natura {{ background: linear-gradient(120deg, #1F8A54 0%, #0E6E63 100%); }}
 
 .tag {{ display:inline-flex; align-items:center; gap:6px; font-size:.8rem; font-weight:500; }}
 .dot {{ width:8px; height:8px; border-radius:50%; display:inline-block; }}
@@ -52,6 +81,17 @@ h1, h2, h3 {{ font-family: Fraunces, Georgia, serif; letter-spacing: -0.01em; co
 [data-testid="stSidebar"] {{ background: {PANEL}; border-right: 1px solid {LINE}; }}
 [data-testid="stSidebar"] .stButton button {{ border-radius: 8px; }}
 
+/* Botones con micro-interacción. */
+.stButton button {{ transition: transform .14s ease, box-shadow .14s ease, filter .14s ease; }}
+.stButton button:hover {{ transform: translateY(-1px); box-shadow: 0 8px 18px -12px rgba(22,32,46,.45); }}
+.stButton button:active {{ transform: translateY(0); }}
+
+/* Selector de marca (segmented_control / radio) como toggle limpio. */
+[data-testid="stSidebar"] [role="radiogroup"] {{ gap: 6px; }}
+[data-testid="stSidebar"] [data-baseweb="segmented-control"] {{ border-radius: 10px; }}
+.stDownloadButton button {{ transition: transform .14s ease, box-shadow .14s ease; }}
+.stDownloadButton button:hover {{ transform: translateY(-1px); box-shadow: 0 8px 18px -12px rgba(22,32,46,.45); }}
+
 /* Chrome de Streamlit fuera: se ve como producto, no como demo. */
 #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stDecoration"],
 [data-testid="stStatusWidget"], .stDeployButton, .stAppDeployButton {{ display: none !important; }}
@@ -68,6 +108,13 @@ header[data-testid="stHeader"] {{ background: transparent; height: 0; }}
 h1 {{ font-size: 1.9rem; }} h2 {{ font-size: 1.35rem; }} h3 {{ font-size: 1.08rem; }}
 hr {{ border-color: {LINE}; }}
 a {{ color: {TEAL}; }}
+
+/* Respeta a quien pide menos movimiento. */
+@media (prefers-reduced-motion: reduce) {{
+  *, .panel, .bar-fill, .brand-hero, [data-testid="stMetric"], [data-testid="stDataFrame"] {{
+    animation: none !important; transition: none !important;
+  }}
+}}
 </style>
 """
 
