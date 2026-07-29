@@ -10,6 +10,7 @@ from .ingest import build_ingest
 from .metrics import compute_metrics
 
 AGENTES = ["María Pérez", "Juan Gómez", "Ana Ruiz", "Luis Torres", "Sofía Díaz"]
+AGENTES_NATURA = ["Carla Mendoza", "Diego Fuentes", "Paola Nava", "Iván Salas", "Renata Cruz"]
 TEMPS = ["Mora 1", "Mora 2", "Mora 3", "MNI", "IM"]
 TEMPS_NATURA = ["Al corriente", "Mora 1", "Mora 2", "Mora 3", "Castigo"]
 
@@ -25,9 +26,11 @@ def _rng(seed: int):
     return nxt
 
 
-def synth(anio: str, seed: int, temps: list[str] | None = None, proyecto: str = "Arabela") -> dict[str, pd.DataFrame]:
+def synth(anio: str, seed: int, temps: list[str] | None = None, proyecto: str = "Arabela",
+          agentes: list[str] | None = None) -> dict[str, pd.DataFrame]:
     r = _rng(seed)
     temps = temps or TEMPS
+    agentes = agentes or AGENTES
     N = 60
     cartera, pagos, gestiones, vicidial, ivr, sms = [], [], [], [], [], []
     for i in range(N):
@@ -44,13 +47,13 @@ def synth(anio: str, seed: int, temps: list[str] | None = None, proyecto: str = 
             es_c = r() < 0.55
             fecha = f"2025-06-{dia:02d} 10:15:00"
             promesa = f"{dia + 2:02d}/06/2025" if (es_c and r() < 0.6) else None
-            ag = AGENTES[int(r() * len(AGENTES))]
+            ag = agentes[int(r() * len(agentes))]
             gestiones.append({"FECHA": fecha, "NOMBRE GESTOR": ag, "CODIGO": num, "zona": f"Z{i % 5 + 1}",
                               "ruta": f"R{i % 9 + 1}", "temp": temp, "TIPO DE GESTION": "CONTACTO" if es_c else "NO CONTACTO",
                               "TELEFONO": "55", "Estatus": "OK", "TIPIFICACIlON": "PROMESA DE PAGO" if es_c else "NO CONTESTA",
                               "COMENTARIO": "", "DIA PROM": "", "MEDICION": "", "PROMESA": promesa})
             vicidial.append({"call_date": fecha, "phone_number_dialed": num, "status": "SALE" if es_c else "NA",
-                             "user": f"u{AGENTES.index(ag) + 1}", "full_name": ag, "campaign_id": anio,
+                             "user": f"u{agentes.index(ag) + 1}", "full_name": ag, "campaign_id": anio,
                              "length_in_sec": int(r() * 180), "status_name": "Contacto" if es_c else "No contesta"})
         if r() < 0.5:
             dia = 1 + int(r() * 25)
@@ -94,7 +97,8 @@ def build_demo() -> dict:
     """Devuelve un store en memoria con shape idéntico a las tablas de Supabase."""
     campaigns = []
     data: dict[str, dict] = {}
-    hist_puntos: dict[str, dict] = {}
+    # Historia segmentada por marca: {marca: {agente_id: {...}}}. Nada se mezcla.
+    hist_por_marca: dict[str, dict] = {}
 
     # Snapshots DIARIOS por apartado (marca). Arabela con varios días de la misma
     # campaña + otra campaña para la comparativa; Natura como apartado aislado.
@@ -114,7 +118,7 @@ def build_demo() -> dict:
         es_natura = marca == "natura"
         ing = build_ingest(
             synth(anio, seed, temps=TEMPS_NATURA if es_natura else TEMPS,
-                  proyecto=brand.nombre),
+                  proyecto=brand.nombre, agentes=AGENTES_NATURA if es_natura else AGENTES),
             brand=brand,
         )
         m = compute_metrics(ing)
@@ -140,17 +144,20 @@ def build_demo() -> dict:
                                                    "contactos_efectivos": ing.profile["costo_marcador"]["contactos_efectivos"]},
             "estrategia": compute_estrategia(ing, brand),
         }
-        # Evolución del gestor por día (snapshot): solo la campaña principal Arabela.
-        if marca == "arabela" and anio == "2025C12":
+        # Evolución del gestor por día (snapshot): la campaña principal de cada marca
+        # (Arabela 2025C12 / Natura 2025C08). Se guarda BAJO su marca — sin cruce.
+        if (marca == "arabela" and anio == "2025C12") or (marca == "natura" and anio == "2025C08"):
+            hp = hist_por_marca.setdefault(marca, {})
             for a in m["agentes"]:
-                entry = hist_puntos.setdefault(a["agente_id"], {"display": a["nombre"], "puntos": []})
+                entry = hp.setdefault(a["agente_id"], {"display": a["nombre"], "puntos": []})
                 entry["puntos"].append({"anio": snap, "contacto": a["tasa_contacto"],
                                         "cumplimiento": a["pct_cumplimiento"], "clasificacion": a["clasificacion"]})
 
-    for e in hist_puntos.values():
-        e["puntos"].sort(key=lambda x: x["anio"])
+    for hp in hist_por_marca.values():
+        for e in hp.values():
+            e["puntos"].sort(key=lambda x: x["anio"])
 
-    return {"campaigns": campaigns, "data": data, "historia": hist_puntos}
+    return {"campaigns": campaigns, "data": data, "historia": hist_por_marca}
 
 
 def _mentor_nombre(a: dict, agentes: list[dict]) -> str | None:

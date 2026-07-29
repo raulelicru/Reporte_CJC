@@ -152,12 +152,16 @@ def get_comparativa() -> dict:
             "canales": [_stringify_dates(c) for c in canales], "cumplimiento": cumplimiento}
 
 
-def get_historia_gestores() -> dict:
-    rows = _q("""select ma.tasa_contacto, ma.pct_cumplimiento, ma.clasificacion,
+def get_historia_gestores(brand: str | None = None) -> dict:
+    # Aislado por marca: la evolución de un gestor no cruza Arabela con Natura.
+    where = "where c.brand = %s" if brand else ""
+    params = (brand,) if brand else ()
+    rows = _q(f"""select ma.tasa_contacto, ma.pct_cumplimiento, ma.clasificacion,
                         a.nombre_norm, a.nombre_display, c.anio_campania, c.fecha_snapshot
                  from metrics_agente ma
                  join agentes a on a.id = ma.agente_id
-                 join campaigns c on c.id = ma.campaign_id""")
+                 join campaigns c on c.id = ma.campaign_id
+                 {where}""", params)
     hist: dict[str, dict] = {}
     for r in rows:
         norm = r["nombre_norm"]

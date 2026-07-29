@@ -116,7 +116,12 @@ class Data:
         return self._d(cid, "costo_marcador") if self.demo else db.get_costo_marcador(cid)
 
     def historia(self):
-        return self.store["historia"] if self.demo else db.get_historia_gestores()
+        bid = active_brand_id()
+        if not self.demo:
+            return db.get_historia_gestores(bid)
+        # En demo la historia está segmentada por marca (nada se mezcla).
+        h = (self.store or {}).get("historia") or {}
+        return h.get(bid, {})
 
     def estrategia(self, cid):
         return self._d(cid, "estrategia") if self.demo else db.get_estrategia(cid)
