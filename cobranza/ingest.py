@@ -71,11 +71,28 @@ def read_sheet(source) -> pd.DataFrame:
 
 
 def _colmap(df: pd.DataFrame, mapping: dict[str, list[str]]) -> dict[str, str | None]:
-    """Resuelve columnas por candidatos (case/acento-insensible)."""
+    """Resuelve columnas por candidatos (case/acento-insensible).
+
+    1) Coincidencia exacta normalizada.
+    2) Respaldo por prefijo SOLO si es inequívoco (una columna) y el candidato
+       tiene ≥6 caracteres — evita colisiones tontas pero absorbe variantes
+       ('Consultora' ↔ 'ConsultoraNum'). No adivina a lo loco.
+    """
     norm_to_actual = {norm_key(c): c for c in df.columns}
+    keys = list(norm_to_actual.keys())
     out: dict[str, str | None] = {}
     for canon, cands in mapping.items():
-        out[canon] = next((norm_to_actual[norm_key(c)] for c in cands if norm_key(c) in norm_to_actual), None)
+        hit = next((norm_to_actual[norm_key(c)] for c in cands if norm_key(c) in norm_to_actual), None)
+        if hit is None:
+            for c in cands:
+                nc = norm_key(c)
+                if len(nc) < 6:
+                    continue
+                cols = [norm_to_actual[k] for k in keys if k.startswith(nc) or nc.startswith(k)]
+                if len(cols) == 1:
+                    hit = cols[0]
+                    break
+        out[canon] = hit
     return out
 
 
@@ -88,6 +105,15 @@ def _records(df: pd.DataFrame, cm: dict[str, str | None]) -> list[dict]:
 
 def _flag(flags, tipo, detalle, severidad="info"):
     flags.append({"tipo": tipo, "detalle": detalle, "severidad": severidad})
+
+
+def _falta_col(cm, campos, archivo, df, flags):
+    """Si NINGUNA de las columnas clave se resolvió, lo reporta con los
+    encabezados reales — así una marca nueva (Natura) se depura de un vistazo."""
+    if all(cm.get(c) is None for c in campos):
+        cols = ", ".join(str(c).strip() for c in list(df.columns)[:25])
+        _flag(flags, "columna_no_encontrada",
+              f"[{archivo}] no se encontró {' ni '.join(campos)}. Columnas presentes: {cols}", "warn")
 
 
 def _max_iso(a, b):
@@ -129,6 +155,8 @@ def build_ingest(sheets: dict[str, pd.DataFrame], brand=None) -> IngestResult:
         "saldo_cobro": ["SaldoCobro"], "zona": ["NumeroZonaFacturacion", "zona"],
         "ruta": ["Ruta"], "fecha_entrega": ["FechaEntrega"],
     }))
+    _falta_col(cm, ["num_dama", "dama_deuda"], "cartera", df, flags)
+    _falta_col(cm, ["saldo_cobro"], "cartera", df, flags)
     cartera_by_key: dict[str, dict] = {}
     sin_llave = enc_roto = 0
     total_cartera = 0
@@ -200,6 +228,9 @@ def build_ingest(sheets: dict[str, pd.DataFrame], brand=None) -> IngestResult:
         "tipo_gestion": ["TIPO DE GESTION"], "tipificacion": ["TIPIFICACION", "TIPIFICACIlON"],
         "promesa": ["PROMESA", "DIA PROM"], "medicion": ["MEDICION"], "temp": ["temp"],
     }))
+    _falta_col(cm, ["num_dama"], "gestiones", df, flags)
+    _falta_col(cm, ["gestor"], "gestiones", df, flags)
+    _falta_col(cm, ["fecha"], "gestiones", df, flags)
     gestiones: list[dict] = []
     medicion_vacia = sin_fecha = sistema = 0
     for row in _records(df, cm):
@@ -289,6 +320,8 @@ def build_ingest(sheets: dict[str, pd.DataFrame], brand=None) -> IngestResult:
         "status": ["status_name", "Estado de la Llamada", "Estado Final", "Status"],
         "dtmf": ["Respuesta DTMF"],
     }))
+    _falta_col(cm, ["num_dama"], "ivr", df, flags)
+    _falta_col(cm, ["fecha"], "ivr", df, flags)
     ivr_sin_fecha = ivr_total = 0
     ivr_en_cartera = 0
     for row in _records(df, cm):
@@ -310,6 +343,8 @@ def build_ingest(sheets: dict[str, pd.DataFrame], brand=None) -> IngestResult:
 
     df = sheets["sms"]
     cm = _colmap(df, _merge("sms", {"num_dama": ["Dama"], "fecha": ["Fecha Envio"], "descripcion": ["Descripcion"], "operador": ["Operador"]}))
+    _falta_col(cm, ["num_dama"], "sms", df, flags)
+    _falta_col(cm, ["fecha"], "sms", df, flags)
     sms_dama_nula = sms_total = sms_en_cartera = 0
     for row in _records(df, cm):
         sms_total += 1

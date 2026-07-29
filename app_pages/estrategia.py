@@ -3,6 +3,7 @@ import pandas as pd
 import streamlit as st
 
 from cobranza import ui
+from cobranza.analytics import COSTOS_DEFAULT, roi_recompute
 from cobranza.charts import bar_list, heatmap_timing, mirror_bars
 from cobranza.format import money, money_k, num, pct
 
@@ -111,6 +112,51 @@ def render():
             m = tm["mejor"]
             st.caption(f"Mejor franja con volumen: {m['dow_lbl']} {m['hora']}:00 — {pct(m['tasa'])} de contacto ({num(m['efectivos'])}/{num(m['toques'])}).")
 
+    # ── ROI en pesos por canal ──
+    _roi(e)
+
     st.divider()
-    st.caption("Fase A del roadmap elite. En camino: modelos (logístico/árbol/uplift), roll-rate por snapshot, "
-               "ROI en pesos por canal (requiere costo) y champion/challenger (requiere grupo de control).")
+    st.caption("Fase A + B del roadmap elite: hazard corregido, timing, modelos, roll-rate, segmentación, "
+               "correlación y ROI en pesos. Pendiente champion/challenger (requiere grupo de control).")
+
+
+def _roi(e):
+    roi = e.get("roi") or {}
+    vols = roi.get("volumenes")
+    if not roi.get("disponible") or not vols:
+        return
+    ui.section("ROI en pesos por canal", "Retorno sobre costo",
+               "Recuperación atribuida (último toque) contra el costo del canal. Los costos unitarios son editables: "
+               "muévelos a los de tu operación y el retorno se recalcula al instante.")
+    base = roi.get("costos") or COSTOS_DEFAULT
+    with st.expander("Ajustar costos unitarios (pesos)"):
+        c = st.columns(4)
+        costos = {
+            "Llamada": c[0].number_input("$ / gestión (Llamada)", min_value=0.0, value=float(base["Llamada"]), step=0.5),
+            "IVR": c[1].number_input("$ / intento (IVR)", min_value=0.0, value=float(base["IVR"]), step=0.05, format="%.2f"),
+            "SMS": c[2].number_input("$ / mensaje (SMS)", min_value=0.0, value=float(base["SMS"]), step=0.05, format="%.2f"),
+            "marcador_min": c[3].number_input("$ / min marcador (C3)", min_value=0.0, value=float(base["marcador_min"]), step=0.05, format="%.2f"),
+        }
+    r = roi_recompute(vols, costos)
+
+    cols = st.columns(3)
+    cols[0].metric("Recuperado atribuido", money_k(r["recuperado_total"]))
+    cols[1].metric("Costo estimado", money_k(r["costo_total"]))
+    cols[2].metric("ROI global", f'{r["roi_total"]:.1f}×' if r["roi_total"] else "—",
+                   delta=f'neto {money_k(r["neto_total"])}')
+    df = pd.DataFrame([{
+        "Canal": f["canal"], "Intentos": f["intentos"], "Efectivos": f["efectivos"],
+        "$ unitario": round(f["costo_unitario"], 2), "Costo": round(f["costo"]),
+        "Recuperado (atrib.)": round(f["recuperado"]),
+        "Neto": round(f["neto"]), "ROI": f'{f["roi"]:.1f}×' if f["roi"] else "—",
+        "Costo/$ recup.": f'{f["costo_por_peso"]:.3f}' if f["costo_por_peso"] else "—",
+    } for f in r["filas"]])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.markdown(bar_list([{"label": f["canal"], "value": max(0.0, f["roi"] or 0),
+                           "fill": {"Llamada": "fill-llamada", "IVR": "fill-ivr", "SMS": "fill-sms"}[f["canal"]],
+                           "right": f'{money(f["recuperado"])} ÷ {money(f["costo"])} = {f["roi"]:.1f}×' if f["roi"] else "sin costo"}
+                          for f in r["filas"]],
+                         max_value=max([(f["roi"] or 0) for f in r["filas"]] + [1.0])), unsafe_allow_html=True)
+    if r["costo_marcador"] > 0:
+        st.caption(f'El costo del marcador automático (C3) es {money(r["costo_marcador"])} y se carga al canal Llamada. '
+                   "Atribución por último toque: es una foto con supuestos explícitos, no contabilidad.")

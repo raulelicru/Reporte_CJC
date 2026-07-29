@@ -138,6 +138,37 @@ def heatmap_timing(celdas: list[dict]) -> str:
     return f'<div style="overflow-x:auto">' + "".join(parts) + "</div>"
 
 
+def corr_heatmap(labels: list[str], matriz: list[list[float]]) -> str:
+    """Matriz de correlación (Pearson): azul = positiva, rojo = negativa, blanco = 0."""
+    if not labels or not matriz:
+        return '<div style="color:#5A6472;font-size:.85rem">Sin datos.</div>'
+    n = len(labels)
+    cell, lx, ty = 42, 96, 96
+    w = lx + n * cell + 10
+    h = ty + n * cell + 10
+    parts = [f'<svg width="{w}" height="{h}" role="img">']
+    # Encabezados de columna (rotados) y de fila.
+    for j, lb in enumerate(labels):
+        cx = lx + j * cell + cell / 2
+        parts.append(f'<text x="{cx:.0f}" y="{ty - 8}" text-anchor="start" font-size="9" fill="#5A6472" transform="rotate(-45 {cx:.0f} {ty - 8})">{html.escape(lb)}</text>')
+    for i, lb in enumerate(labels):
+        parts.append(f'<text x="{lx - 6}" y="{ty + i * cell + cell / 2 + 3:.0f}" text-anchor="end" font-size="9" fill="#5A6472">{html.escape(lb)}</text>')
+    for i in range(n):
+        for j in range(n):
+            v = matriz[i][j]
+            x = lx + j * cell
+            y = ty + i * cell
+            if v >= 0:
+                fill = _mix("#FFFFFF", "#2b5c9a", v)
+            else:
+                fill = _mix("#FFFFFF", "#B3312C", -v)
+            txt = "#16202E" if abs(v) < 0.55 else "white"
+            parts.append(f'<rect x="{x}" y="{y}" width="{cell - 2}" height="{cell - 2}" rx="2" fill="{fill}"><title>{html.escape(labels[i])} ↔ {html.escape(labels[j])}: {v:+.2f}</title></rect>')
+            parts.append(f'<text x="{x + cell / 2 - 1:.0f}" y="{y + cell / 2 + 3:.0f}" text-anchor="middle" font-size="9" fill="{txt}">{v:+.2f}</text>')
+    parts.append("</svg>")
+    return f'<div style="overflow-x:auto" class="panel">' + "".join(parts) + "</div>"
+
+
 def mirror_bars(rows: list[dict], left_key: str, right_key: str, label_key: str,
                 left_lbl: str, right_lbl: str, colors: dict | None = None) -> str:
     """Barras espejo: reparto de esfuerzo (izq) vs reparto del dinero (der).

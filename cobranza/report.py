@@ -273,6 +273,46 @@ def build_report_html(ctx: dict[str, Any]) -> str:
             _table(["Gestor", "Gestiones", "Contacto", "Cumplim.", "Recuperado", "Clasificación"], rows),
             "Umbrales relativos a la mediana del equipo. Lenguaje de desarrollo, no de despido.")
 
+    # 09 · ROI en pesos por canal
+    roi = e.get("roi") or {}
+    if roi.get("disponible") and roi.get("filas"):
+        rows = [[f["canal"], _num(f["intentos"]), _money(f["costo"]), _money(f["recuperado"]),
+                 _money(f["neto"]), (f'{f["roi"]:.1f}×' if f["roi"] else "—")] for f in roi["filas"]]
+        rows.append(["Total", "", _money(roi["costo_total"]), _money(roi["recuperado_total"]),
+                     _money(roi["neto_total"]), (f'{roi["roi_total"]:.1f}×' if roi.get("roi_total") else "—")])
+        bars = _bars([{"label": f["canal"], "value": max(0.0, f["roi"] or 0),
+                       "color": CANAL_COL.get(f["canal"], SIGNAL),
+                       "right": f'{_money(f["recuperado"])} ÷ {_money(f["costo"])} = {f["roi"]:.1f}×' if f["roi"] else "sin costo"}
+                      for f in roi["filas"]])
+        add("roi", "ROI", "09 · Economía", "Retorno en pesos por canal",
+            bars + _table(["Canal", "Intentos", "Costo", "Recuperado", "Neto", "ROI"], rows),
+            "Recuperación atribuida (último toque) sobre el costo del canal, con costos unitarios de referencia. "
+            "El marcador automático (C3) se carga a Llamada. Foto con supuestos explícitos, editable en la app.")
+
+    # 10 · Segmentación (k-means)
+    seg = e.get("segmentacion") or {}
+    if seg.get("disponible") and seg.get("segmentos"):
+        rows = [[s["etiqueta"], _num(s["damas"]), _pct(s["pct"]), _pct(s["tasa_pago"]),
+                 f'{s["gestiones_prom"]:.1f}', _money(s["saldo_prom"]), _money(s["recuperado"]),
+                 s["tramo_dominante"]] for s in seg["segmentos"]]
+        bars = _bars([{"label": f'{s["etiqueta"]} · {s["tramo_dominante"]}', "value": s["tasa_pago"],
+                       "color": RAMP[i % len(RAMP)], "right": f'{_pct(s["tasa_pago"])} · {_num(s["damas"])}'}
+                      for i, s in enumerate(seg["segmentos"])])
+        add("segmentos", "Segmentos", "10 · Segmentación", f"Perfiles de cartera (k-means, k={seg.get('k')})",
+            bars + _table(["Segmento", unidad.capitalize(), "% cartera", "Tasa pago", "Gest. prom", "Saldo prom", "Recuperado", "Tramo dom."], rows),
+            "Grupos por perfil de gestión y saldo (sin usar el pago para agrupar), descritos con su tasa real. "
+            "Sirven para diseñar guiones y cadencias por segmento, no dama por dama.")
+
+    # 11 · Correlación (palancas)
+    cr = e.get("correlacion") or {}
+    if cr.get("disponible") and cr.get("con_pago"):
+        bars = _bars([{"label": c["var"], "value": abs(c["r"]), "color": SIGNAL if c["r"] >= 0 else MUTED,
+                       "right": f'{c["r"]:+.2f}'} for c in cr["con_pago"][:6]])
+        add("palancas", "Palancas", "11 · Correlación", "Qué se asocia al pago",
+            bars,
+            "Correlación de Pearson de cada palanca con el pago. Asociación, no causa — la causa la resuelve el panel hazard. "
+            "Valores bajos son normales en cobranza: el pago depende de muchos factores.")
+
     navhtml = "".join(f'<a href="#{sid}"><span>{_esc(lbl)}</span></a>' for sid, lbl in nav)
     data_json = json.dumps(ctx.get("estrategia") or {}, ensure_ascii=False, default=str)
     titulo = f'{b.nombre} · Cobranza — {_esc(camp.get("anio_campania",""))}'

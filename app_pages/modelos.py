@@ -4,8 +4,8 @@ import streamlit as st
 
 from cobranza import ui
 from cobranza.analytics import roll_rate
-from cobranza.charts import bar_list
-from cobranza.format import num, pct
+from cobranza.charts import bar_list, corr_heatmap
+from cobranza.format import money, num, pct
 
 
 def render():
@@ -23,6 +23,8 @@ def render():
         _deciles(m)
         _arbol(m)
 
+    _segmentos(e, ui.brand_of(actual))
+    _correlacion(e)
     _rollrate(actual, camps)
 
 
@@ -72,6 +74,50 @@ def _arbol(m):
                         "Damas": r["n"], "Tasa real de pago": round(r["tasa_real"] * 100, 1)}
                        for r in reglas])
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+def _segmentos(e, brand):
+    seg = (e or {}).get("segmentacion") or {}
+    if not seg.get("disponible"):
+        ui.section("Segmentación de cartera (k-means)", "Perfiles de gestión",
+                   "Agrupa por PERFIL de gestión y saldo, sin mirar el resultado; luego describe cada grupo con su tasa real de pago.")
+        st.info(f"Segmentación no disponible: {seg.get('motivo', 'datos insuficientes')}.")
+        return
+    ui.section("Segmentación de cartera (k-means)", "Perfiles de gestión",
+               f"{seg['k']} grupos por perfil de gestión/saldo ({num(seg['n'])} {brand.unidad_plural}). "
+               "No usa el pago para agrupar — lo describe. Ordenados de mejor a peor respuesta.")
+    df = pd.DataFrame([{
+        "Segmento": s["etiqueta"], f"{brand.unidad_cap}s": s["damas"],
+        "% cartera": round(s["pct"] * 100, 1),
+        "Tasa de pago": round(s["tasa_pago"] * 100, 1),
+        "Gestiones prom.": round(s["gestiones_prom"], 1),
+        "Llam/IVR/SMS": f'{s["llamadas_prom"]:.1f}/{s["ivr_prom"]:.1f}/{s["sms_prom"]:.1f}',
+        "Saldo prom.": round(s["saldo_prom"]),
+        "Recuperado": round(s["recuperado"]),
+        "Tramo dominante": s["tramo_dominante"],
+    } for s in seg["segmentos"]])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.markdown(bar_list([{"label": f'{s["etiqueta"]} · {s["tramo_dominante"]}', "value": s["tasa_pago"],
+                           "fill": "fill-llamada", "right": f'{pct(s["tasa_pago"])} · {num(s["damas"])} · {money(s["recuperado"])}'}
+                          for s in seg["segmentos"]],
+                         max_value=max([s["tasa_pago"] for s in seg["segmentos"]] + [0.01])), unsafe_allow_html=True)
+    st.caption("Cada segmento es un perfil real de la cartera: úsalo para diseñar guiones y cadencias por grupo, no dama por dama.")
+
+
+def _correlacion(e):
+    cr = (e or {}).get("correlacion") or {}
+    if not cr.get("disponible"):
+        return
+    ui.section("Correlación entre palancas", "Qué se mueve junto",
+               "Correlación de Pearson entre variables de gestión y el pago. Asociación, no causa (eso lo resuelve el panel hazard). Azul = positiva, rojo = negativa.")
+    st.markdown(corr_heatmap(cr["labels"], cr["matriz"]), unsafe_allow_html=True)
+    top = cr.get("con_pago") or []
+    if top:
+        st.markdown(bar_list([{"label": c["var"], "value": abs(c["r"]),
+                               "fill": "fill-llamada" if c["r"] >= 0 else "fill-espontaneo",
+                               "right": f'{c["r"]:+.2f}'} for c in top[:6]],
+                             max_value=max([abs(c["r"]) for c in top] + [0.05])), unsafe_allow_html=True)
+        st.caption("Barras: fuerza de asociación de cada variable con el pago (signo indicado). Valores bajos son normales en cobranza — el pago depende de muchos factores.")
 
 
 def _rollrate(actual, camps):
