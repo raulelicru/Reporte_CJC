@@ -73,16 +73,23 @@ def campaigns_de_marca():
 # ──────────────────────────────────────────────────────────────────────────
 class Data:
     def __init__(self):
-        self.demo = st.session_state.get("demo", False)
+        self.demo = bool(st.session_state.get("demo", False))
         self.store = st.session_state.get("store")
+        # Auto-reparación: si el modo demo quedó activo pero el store se perdió
+        # (p. ej. tras un redeploy con una pestaña vieja), lo reconstruimos en vez
+        # de reventar al indexar None.
+        if self.demo and not self.store:
+            from .demo import build_demo
+            self.store = build_demo()
+            st.session_state["store"] = self.store
 
     def campaigns(self):
         if self.demo:
-            return self.store["campaigns"]
+            return (self.store or {}).get("campaigns", [])
         return db.get_campaigns()
 
     def _d(self, cid, key):
-        return self.store["data"].get(cid, {}).get(key)
+        return (self.store or {}).get("data", {}).get(cid, {}).get(key)
 
     def resumen(self, cid):
         return self._d(cid, "resumen") if self.demo else db.get_resumen(cid)

@@ -34,10 +34,13 @@ def render():
                 _login()
 
             if st.button("Entrar en modo demo (datos sintéticos)", use_container_width=True):
+                # Construir el store PRIMERO: si algo fallara, no dejamos el estado
+                # a medias (demo=True sin store) que reventaría en la siguiente vista.
+                store = build_demo()
+                st.session_state["store"] = store
+                st.session_state["profile"] = {"rol": "admin", "nombre": "Demo", "org_id": db.DEFAULT_ORG}
                 st.session_state["demo"] = True
                 st.session_state["authed"] = True
-                st.session_state["store"] = build_demo()
-                st.session_state["profile"] = {"rol": "admin", "nombre": "Demo", "org_id": db.DEFAULT_ORG}
                 st.rerun()
 
         st.caption("Acceso restringido. Sin sesión no se entra a ninguna vista.")
