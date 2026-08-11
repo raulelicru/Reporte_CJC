@@ -81,6 +81,19 @@ svg:hover rect:hover, svg:hover circle:hover {{ opacity: .82; }}
 [data-testid="stSidebar"] {{ background: {PANEL}; border-right: 1px solid {LINE}; }}
 [data-testid="stSidebar"] .stButton button {{ border-radius: 8px; }}
 
+/* Barra lateral FIJA: siempre visible, no se colapsa ni desaparece. */
+[data-testid="stSidebar"] {{
+    transform: none !important;
+    visibility: visible !important;
+    min-width: 244px !important;
+    width: 244px !important;
+    margin-left: 0 !important;
+}}
+[data-testid="stSidebar"][aria-expanded="false"] {{ margin-left: 0 !important; transform: none !important; }}
+/* Ocultar el botón de colapsar (‹) y el control flotante para expandir. */
+[data-testid="stSidebarCollapseButton"], [data-testid="collapsedControl"],
+button[kind="headerNoPadding"][data-testid="baseButton-headerNoPadding"] {{ display: none !important; }}
+
 /* Botones con micro-interacción. */
 .stButton button {{ transition: transform .14s ease, box-shadow .14s ease, filter .14s ease; }}
 .stButton button:hover {{ transform: translateY(-1px); box-shadow: 0 8px 18px -12px rgba(22,32,46,.45); }}

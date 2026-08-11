@@ -25,7 +25,8 @@ from app_pages import (
     tendencia,
 )
 
-st.set_page_config(page_title="Consultores CRZ · Cobranza", page_icon="◆", layout="wide")
+st.set_page_config(page_title="Consultores CRZ · Cobranza", page_icon="◆", layout="wide",
+                   initial_sidebar_state="expanded")
 theme.inject()
 
 # Estado inicial
