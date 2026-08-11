@@ -122,6 +122,9 @@ def compute_estrategia(ing, brand=None, lookback: int = 2) -> dict[str, Any]:
     # ── ROI en pesos por canal (costos por defecto; editable en la app) ──
     roi = _roi(ing, brand)
 
+    # ── Nueva cartera: no tocada (sin contacto efectivo) Y sin pago ──
+    cartera_nueva = _cartera_no_trabajada(ing.cartera, ef_por_dama, pago_dia, temp_dama)
+
     return {
         "disponible": True,
         "ventana": {"inicio": inicio, "corte": corte, "lookback": lookback},
@@ -138,6 +141,7 @@ def compute_estrategia(ing, brand=None, lookback: int = 2) -> dict[str, Any]:
         "segmentacion": segmentacion,
         "correlacion": correlacion,
         "roi": roi,
+        "cartera_nueva": cartera_nueva,
         # Mapa temporalidad por dama (para roll-rate entre snapshots).
         "temp_por_dama": {str(d): temp_dama[d] for d in evaluables if d in temp_dama},
     }
@@ -546,6 +550,32 @@ def roi_recompute(volumenes: dict, costos: dict | None = None) -> dict:
         "roi_total": (tot_rec / tot_costo) if tot_costo > 0 else None,
         "costo_marcador": costo_marcador,
     }
+
+
+def _cartera_no_trabajada(cartera, ef_por_dama, pago_dia, temp_dama) -> dict:
+    """Cuentas que quedaron SIN trabajar: ni un contacto efectivo Y sin pago.
+
+    Es la cartera a re-lanzar como nueva: nunca se contactó y no recuperó nada,
+    así que entra limpia al siguiente ciclo. Ordenada por saldo (mayor primero).
+    """
+    contactadas = set(ef_por_dama.keys())   # ≥1 toque EFECTIVO
+    pagadoras = set(pago_dia.keys())         # pago con recuperado > 0
+    filas, saldo_total = [], 0.0
+    for c in cartera:
+        d = c.get("num_dama")
+        if d in contactadas or d in pagadoras:
+            continue
+        s = c.get("saldo_cobro") or 0.0
+        saldo_total += s
+        filas.append({
+            "num_dama": d, "dama_deuda": c.get("dama_deuda"), "saldo": s,
+            "zona": c.get("zona"), "ruta": c.get("ruta"),
+            "temporalidad": temp_dama.get(d) or "",
+        })
+    filas.sort(key=lambda x: -(x["saldo"] or 0))
+    n_total = len(cartera) or 1
+    return {"cuentas": len(filas), "saldo_total": saldo_total,
+            "pct_cuentas": len(filas) / n_total, "filas": filas}
 
 
 def roll_rate(temp_prev: dict, temp_cur: dict, brand) -> dict:
