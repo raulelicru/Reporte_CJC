@@ -23,6 +23,7 @@ from app_pages import (
     secuencias,
     temporalidad,
     tendencia,
+    usuarios,
 )
 
 st.set_page_config(page_title="Consultores CRZ · Cobranza", page_icon="◆", layout="wide",
@@ -92,6 +93,7 @@ paginas = [
 ]
 if ui.is_admin():
     paginas.append(_p(carga.render, "Carga de datos", ":material/upload_file:", "carga"))
+    paginas.append(_p(usuarios.render, "Usuarios", ":material/manage_accounts:", "usuarios"))
 paginas.append(_p(metodologia.render, "Metodología", ":material/menu_book:", "metodologia"))
 
 st.navigation(paginas).run()

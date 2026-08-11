@@ -91,6 +91,19 @@ def sign_in(email: str, password: str) -> dict | None:
             "org_id": str(row["org_id"]), "nombre": row["nombre"]}
 
 
+def list_users(org_id: str = DEFAULT_ORG) -> list[dict]:
+    rows = _q("""select id, email, nombre, rol, equipo, created_at
+                 from usuarios where org_id = %s order by created_at""",
+              (org_id,))
+    out = []
+    for r in rows:
+        r["id"] = str(r["id"])
+        if r.get("created_at") is not None and hasattr(r["created_at"], "isoformat"):
+            r["created_at"] = r["created_at"].isoformat()
+        out.append(r)
+    return out
+
+
 def get_profile(user_id: str) -> dict | None:
     row = _q("select id as user_id, rol, org_id, nombre, equipo from usuarios where id = %s",
              (user_id,), fetch="one")
